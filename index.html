@@ -13587,24 +13587,74 @@ function fbDrawBoxes(cv, errs) {
   });
 }
 // HTML sections (one per marked page) for the print window; fileData = PDF data URL or page images
-async function fbMarkedPagesHtml(fileData, errors, setSt) {
+function fbHasBoxes(f) { return !!(f && Array.isArray(f.errors) && f.errors.some(function(e) { return e.page && e.box; })); }
+// the marked pages as pictures: { total, list: [{ n, img }] } (img = JPEG data URL with the E1, E2 … boxes)
+async function fbMarkedPageImgs(fileData, errors) {
   var withPage = (errors || []).filter(function(e) { return e.page && e.box; });
-  if (!withPage.length || !fileData) return '';
+  if (!withPage.length || !fileData) return { total: 0, list: [] };
   var nums = [];
   withPage.forEach(function(e) { if (nums.indexOf(e.page) === -1) nums.push(e.page); });
   nums.sort(function(a, b) { return a - b; });
-  if (setSt) setSt('Drawing the marked answer-sheet pages…');
-  var pages;
-  try { pages = await fbRenderPages(fileData, nums, 1.25); } catch (e) { return '<section><p style="color:#991b1b;">The answer-sheet pages could not be drawn (the PDF could not be read).</p></section>'; }
-  return nums.map(function(n) {
-    var cv = pages[n];
-    if (!cv) return '';
-    var errs = withPage.filter(function(e) { return e.page === n; });
-    fbDrawBoxes(cv, errs);
+  var pages = await fbRenderPages(fileData, nums, 1.25);
+  return { total: pages._n || 0, list: nums.filter(function(n) { return pages[n]; }).map(function(n) {
+    fbDrawBoxes(pages[n], withPage.filter(function(e) { return e.page === n; }));
+    return { n: n, img: pages[n].toDataURL('image/jpeg', 0.72) };
+  }) };
+}
+// one print section per marked page
+function fbPagesSectionsHtml(list, total, errors) {
+  return (list || []).map(function(p) {
+    if (!p.img) return '';
     var qs = [];
-    errs.forEach(function(e) { if (e.q && qs.indexOf(e.q) === -1) qs.push(e.q); });
-    return '<section class="pg"><div class="pgt">Answer sheet page ' + n + (pages._n ? ' of ' + pages._n : '') + (qs.length ? ' — ' + esc(qs.join(', ')) : '') + '</div><img src="' + cv.toDataURL('image/jpeg', 0.75) + '" alt=""></section>';
+    (errors || []).forEach(function(e) { if (e.page === p.n && e.q && qs.indexOf(e.q) === -1) qs.push(e.q); });
+    return '<section class="pg"><div class="pgt">Answer sheet page ' + p.n + (total ? ' of ' + total : '') + (qs.length ? ' — ' + esc(qs.join(', ')) : '') + '</div><img src="' + p.img + '" alt=""></section>';
   }).join('');
+}
+async function fbMarkedPagesHtml(fileData, errors, setSt) {
+  if (setSt) setSt('Drawing the marked answer-sheet pages…');
+  try { var r = await fbMarkedPageImgs(fileData, errors); return fbPagesSectionsHtml(r.list, r.total, errors); }
+  catch (e) { return '<section><p style="color:#991b1b;">The answer-sheet pages could not be drawn (the PDF could not be read).</p></section>'; }
+}
+
+// ⚡ the marked pages are drawn ONCE (right after the feedback is saved) and kept as small pictures, so the
+// report opens at once for the teacher AND the student (who cannot read the answer-sheet PDF itself).
+// Kept in qimages/fbpg_<task>_<phone>_<random key>_<page> — the key is only in that student's own feedback.
+function fbPgId(taskId, phone, key, n) { return 'fbpg_' + taskId + '_' + phone + '_' + key + '_' + n; }
+async function hwStoreMarkedPages(t, phone, f, sub) {
+  if (!fbHasBoxes(f) || !sub) return false;
+  var r = await fbMarkedPageImgs(await hwGetSubData(sub), f.errors);
+  if (!r.list.length) return false;
+  var key = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  for (var i = 0; i < r.list.length; i++) await FBAPI.qImageSave(fbPgId(t.id, phone, key, r.list[i].n), r.list[i].img);
+  var old = f.pgKey && f.pgNums ? { key: f.pgKey, nums: f.pgNums } : null;
+  f.pgKey = key; f.pgNums = r.list.map(function(p) { return p.n; }); f.pgTotal = r.total; f.pgAt = Date.now();
+  await FBAPI.hwFeedbackSave(f);
+  if (old) old.nums.forEach(function(n) { FBAPI.qImageDelete(fbPgId(t.id, phone, old.key, n)).catch(function() {}); });
+  return true;
+}
+// the stored pages → print sections (null = none stored yet)
+async function hwStoredPagesHtml(taskId, phone, f) {
+  if (!f || !f.pgKey || !Array.isArray(f.pgNums) || !f.pgNums.length) return null;
+  var imgs = await Promise.all(f.pgNums.map(function(n) { return FBAPI.qImageGet(fbPgId(taskId, phone, f.pgKey, n)).catch(function() { return ''; }); }));
+  if (!imgs.some(Boolean)) return null;
+  return fbPagesSectionsHtml(f.pgNums.map(function(n, i) { return { n: n, img: imgs[i] }; }), f.pgTotal, f.errors);
+}
+// 🧵 after feedback is saved: the marked pages are made in the background, one student after another
+var hwPgQueue = [], hwPgBusy = false;
+function queueMarkedPages(items) {
+  items.forEach(function(it) { if (fbHasBoxes(it.f) && it.sub) hwPgQueue.push(it); });
+  if (hwPgQueue.length && !hwPgBusy) runPgQueue();
+}
+async function runPgQueue() {
+  hwPgBusy = true;
+  preloadPdfJs();
+  var done = 0;
+  while (hwPgQueue.length) {
+    var it = hwPgQueue.shift();
+    try { if (await hwStoreMarkedPages(it.t, it.phone, it.f, it.sub)) done++; } catch (e) {}
+  }
+  hwPgBusy = false;
+  if (done) showToast('📄 Feedback reports are ready for ' + done + ' student(s) — they can now download them quickly.', 'success');
 }
 // the print window of a feedback report (opened at once, filled when the pages are ready)
 var FB_PRINT_CSS = '@page{size:A4;margin:12mm} body{font-family:system-ui,"Segoe UI",Roboto,"Noto Sans Bengali",sans-serif;color:#111;font-size:12.5px;margin:0}' +
@@ -13627,18 +13677,44 @@ var FB_PRINT_CSS = '@page{size:A4;margin:12mm} body{font-family:system-ui,"Segoe
 function fbOpenPrintWindow() {
   var w = window.open('', '_blank');
   if (!w) { showToast('Please allow pop-ups for this site, then try again.', 'error'); return null; }
-  w.document.write('<p style="font-family:sans-serif;padding:20px">⏳ Preparing the report… (the answer-sheet pages are being drawn)</p>');
+  w.document.write('<p style="font-family:sans-serif;padding:20px">⏳ Preparing the report…</p>');
   return w;
 }
-function fbFillPrintWindow(w, title, pagesHtml) {
+// wait = true: the text is shown at once, the marked pages are put into the <div class="pg-wait"> places later
+// (fbFillPending), and the print / "Save as PDF" window opens when everything is in
+function fbFillPrintWindow(w, title, pagesHtml, wait) {
   w.document.open();
-  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + esc(title) + '</title>' +
     '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">' +
-    '<style>' + FB_PRINT_CSS + '</style></head><body><div class="bar"><button onclick="window.print()">🖨️ Print / Save as PDF</button></div>' + pagesHtml +
+    '<style>' + FB_PRINT_CSS + ' .pg-wait{color:#92400e;font-weight:700;padding:10px;border:1px dashed #f59e0b;border-radius:8px;margin:8px 0} @media print{.pg-wait{display:none}}</style></head><body>' +
+    '<div class="bar"><button onclick="window.print()">🖨️ Print / ⬇ Save as PDF</button>' + (wait ? ' <span id="pg-note" style="color:#92400e;font-weight:700;">⏳ adding the marked answer-sheet pages…</span>' : '') + '</div>' + pagesHtml +
     '<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"><\/script><script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"><\/script>' +
-    '<script>window.addEventListener("load",function(){try{renderMathInElement(document.body,{delimiters:[{left:"\\\\(",right:"\\\\)",display:false},{left:"\\\\[",right:"\\\\]",display:true}],throwOnError:false});}catch(e){}setTimeout(function(){window.print();},700);});<\/script>' +
+    '<script>window.addEventListener("load",function(){try{renderMathInElement(document.body,{delimiters:[{left:"\\\\(",right:"\\\\)",display:false},{left:"\\\\[",right:"\\\\]",display:true}],throwOnError:false});}catch(e){}' + (wait ? '' : 'setTimeout(function(){window.print();},700);') + '});<\/script>' +
     '</body></html>');
   w.document.close();
+}
+// put the marked pages into their place; when nothing is waiting any more, the Save-as-PDF window opens
+function fbFillPending(w, id, html) {
+  try {
+    var el = w.document.getElementById(id);
+    if (el) el.outerHTML = html || '';
+    if (!w.document.querySelector('.pg-wait')) {
+      var nt = w.document.getElementById('pg-note'); if (nt) nt.remove();
+      setTimeout(function() { try { w.focus(); w.print(); } catch (e) {} }, 600);
+    }
+  } catch (e) {}
+}
+// one student's report page (header, details, questions, the feedback itself)
+function hwReportSectionHtml(t, u, phone, f) {
+  var k = HW_KINDS[hwKind(t)], logo = Store.get(LOGO_KEY) || FALLBACK_LOGO;
+  return '<section>' +
+    '<header><img src="' + escA(logo) + '" alt=""><div><h1>A Complete Solution of Mathematics</h1><div class="sub">' + esc(k.title) + ' — Answer Sheet Check &amp; Feedback</div></div></header>' +
+    '<table class="who"><tr><td><b>Student</b></td><td>' + esc(u.fullName || phone) + '</td><td><b>ACSM ID</b></td><td>' + esc(u.regNo || '—') + '</td></tr>' +
+    '<tr><td><b>Class</b></td><td>' + esc(u.studentClass || u.batch || t.cls || '') + '</td><td><b>Phone</b></td><td>' + esc(phone) + '</td></tr>' +
+    '<tr><td><b>' + esc(k.title) + '</b></td><td>' + esc(t.title) + '</td><td><b>Checked on</b></td><td>' + (f.checkedAt ? esc(fmtDateTime(f.checkedAt)) : '') + '</td></tr></table>' +
+    (t.instructions ? '<div class="qs"><b>Questions:</b><div>' + mxa(t.instructions).replace(/\n/g, '<br>') + '</div></div>' : '') +
+    (f.status === 'missing' ? '<div class="fb-card"><b>❌ Not submitted</b>' + (f.remark ? '<div class="fb-remark">💬 ' + mxa(f.remark) + '</div>' : '') + '</div>' : hwFeedbackHtml(f, t)) +
+  '</section>';
 }
 
 // 👁 the teacher sees a student's feedback exactly as the student sees it
@@ -13669,32 +13745,48 @@ async function hwFeedbackPdf(phones) {
   if (!w) return;
   var byId = {};
   DB.get(K.U).forEach(function(u) { byId[u.id] = u; });
-  var logo = Store.get(LOGO_KEY) || FALLBACK_LOGO;
-  var pages = '';
-  preloadPdfJs();
-  // ⚡ the marked pages of several students: downloaded 3 at a time in the background, drawn one after another
-  var needPages = phones.filter(function(p) { var f = d.fb[p]; return f.errors && f.errors.some(function(e) { return e.page && e.box; }) && d.subs[p]; });
-  var nextDl = 0;
-  var pump = function() { while (nextDl < needPages.length && nextDl < (pump.done || 0) + 3) { hwGetSubData(d.subs[needPages[nextDl++]]).catch(function() {}); } };
-  pump();
-  for (var i = 0; i < phones.length; i++) {
-    var p = phones[i], u = byId[p] || { id: p }, f = d.fb[p];
-    pages += '<section>' +
-      '<header><img src="' + escA(logo) + '" alt=""><div><h1>A Complete Solution of Mathematics</h1><div class="sub">' + esc(k.title) + ' — Answer Sheet Check &amp; Feedback</div></div></header>' +
-      '<table class="who"><tr><td><b>Student</b></td><td>' + esc(u.fullName || p) + '</td><td><b>ACSM ID</b></td><td>' + esc(u.regNo || '—') + '</td></tr>' +
-      '<tr><td><b>Class</b></td><td>' + esc(u.studentClass || u.batch || t.cls || '') + '</td><td><b>Phone</b></td><td>' + esc(p) + '</td></tr>' +
-      '<tr><td><b>' + esc(k.title) + '</b></td><td>' + esc(t.title) + '</td><td><b>Checked on</b></td><td>' + (f.checkedAt ? esc(fmtDateTime(f.checkedAt)) : '') + '</td></tr></table>' +
-      (t.instructions ? '<div class="qs"><b>Questions:</b><div>' + mxa(t.instructions).replace(/\n/g, '<br>') + '</div></div>' : '') +
-      (f.status === 'missing' ? '<div class="fb-card"><b>❌ Not submitted</b>' + (f.remark ? '<div class="fb-remark">💬 ' + mxa(f.remark) + '</div>' : '') + '</div>' : hwFeedbackHtml(f, t)) +
-    '</section>';
-    // the student's own pages with the E1, E2 … boxes drawn on them
-    if (f.errors && f.errors.some(function(e) { return e.page && e.box; }) && d.subs[p]) {
-      showToast('Drawing the marked pages of ' + (u.fullName || p) + '…', 'success');
-      try { pages += await fbMarkedPagesHtml(await hwGetSubData(d.subs[p]), f.errors); } catch (e) {}
-      pump.done = (pump.done || 0) + 1; pump();
+  // ⚡ the text of every report is shown AT ONCE; the marked pages come in after (stored pictures = quick)
+  var need = phones.filter(function(p) { return fbHasBoxes(d.fb[p]) && (d.fb[p].pgKey || d.subs[p]); });
+  var html = phones.map(function(p) {
+    return hwReportSectionHtml(t, byId[p] || { id: p }, p, d.fb[p]) + (need.indexOf(p) !== -1 ? '<div class="pg-wait" id="pgw-' + escA(p) + '">⏳ The marked answer-sheet pages are being added…</div>' : '');
+  }).join('');
+  fbFillPrintWindow(w, t.title + ' — feedback', html, need.length > 0);
+  if (!need.length) return;
+  if (need.some(function(p) { return !d.fb[p].pgKey; })) preloadPdfJs();
+  // 3 students at a time
+  var next = 0;
+  var work = async function() {
+    while (next < need.length) {
+      var p = need[next++], f = d.fb[p], sec = null;
+      try { sec = await hwStoredPagesHtml(t.id, p, f); } catch (e) {}
+      if (sec === null && d.subs[p]) {
+        // not stored yet (older feedback): drawn now — and stored, so next time (and for the student) it is quick
+        try {
+          var r = await fbMarkedPageImgs(await hwGetSubData(d.subs[p]), f.errors);
+          sec = fbPagesSectionsHtml(r.list, r.total, f.errors);
+          queueMarkedPages([{ t: t, phone: p, f: f, sub: d.subs[p] }]);
+        } catch (e) { sec = '<section><p style="color:#991b1b;">The answer-sheet pages could not be drawn.</p></section>'; }
+      }
+      fbFillPending(w, 'pgw-' + p, sec || '');
     }
-  }
-  fbFillPrintWindow(w, t.title + ' — feedback', pages);
+  };
+  work(); work(); work();
+}
+
+// 🎓 the STUDENT downloads their own feedback report (the same report the teacher gets)
+async function studentHwReport(taskId) {
+  var t = (hwCache || []).find(function(x) { return x.id === taskId; });
+  var f = hwMineCache && hwMineCache.fb[taskId];
+  if (!t || !f || !currentUser) return;
+  var w = fbOpenPrintWindow();
+  if (!w) return;
+  var stored = !!(f.pgKey && f.pgNums && f.pgNums.length);
+  fbFillPrintWindow(w, t.title + ' — my feedback', hwReportSectionHtml(t, currentUser, currentUser.id, f) +
+    (stored ? '<div class="pg-wait" id="pgw-me">⏳ Your marked answer-sheet pages are being added…</div>' : ''), stored);
+  if (!stored) return;
+  var sec = null;
+  try { sec = await hwStoredPagesHtml(t.id, currentUser.id, f); } catch (e) {}
+  fbFillPending(w, 'pgw-me', sec || '');
 }
 
 // 📄 a first page for every answer sheet in the ZIP: the student's name, ACSM ID and the questions (made as a picture,
@@ -13891,10 +13983,11 @@ function hwCheckJson() {
 async function hwSavePreview() {
   var btn = document.getElementById('hw-fb-save');
   if (btn) btn.disabled = true;
-  var ok = 0;
+  var ok = 0, made = [];
   for (var i = 0; i < hwPreview.length; i++) {
-    try { await FBAPI.hwFeedbackSave(hwPreview[i]); ok++; } catch (e) {}
+    try { await FBAPI.hwFeedbackSave(hwPreview[i]); ok++; made.push({ t: hwDetail.task, phone: hwPreview[i].studentId, f: hwPreview[i], sub: hwDetail.subs[hwPreview[i].studentId] }); } catch (e) {}
   }
+  queueMarkedPages(made);      // 📄 the students' reports are prepared in the background (quick download later)
   closeModal();
   showToast('Feedback saved for ' + ok + ' student(s)' + (ok < hwPreview.length ? ' — ' + (hwPreview.length - ok) + ' failed' : '') + '.', ok < hwPreview.length ? 'error' : 'success');
   hwPreview = [];
@@ -13947,6 +14040,7 @@ async function hwSaveManual(phone) {
   if (fb.status === 'missing') fb.lockWarn = missLockWarnText() || '⚠️ Submit it now. If you do not submit your homework / assignments, your portal will be LOCKED and you will not be able to use your student login until your teacher opens it again.';
   try {
     await FBAPI.hwFeedbackSave(fb);
+    queueMarkedPages([{ t: t, phone: phone, f: fb, sub: d.subs[phone] }]);   // 📄 the report is prepared in the background
     closeModal();
     showToast('Feedback saved.', 'success');
     await reloadHwDetail(false);
@@ -13996,6 +14090,8 @@ function renderStudentHwHtml(u) {
     if (f && f.status === 'checked') {
       status = (hwNewFbIds[t.id] ? '<div class="fb-new blink-live">🆕 Your teacher has checked this — read the feedback below</div>' : '') +
         hwFeedbackHtml(f, t) +
+        // 📄 the same report the teacher gets: feedback + the student's own pages with the mistakes marked
+        '<button type="button" class="btn btn-blue btn-sm" style="margin-top:8px;" onclick="studentHwReport(\'' + escA(t.id) + '\')">📄 Download feedback PDF' + (f.pgKey ? ' (with your marked pages)' : '') + '</button>' +
       (redoAsk && !redone ? '<div class="blink-live" style="margin-top:8px; background:rgba(234,179,8,0.12); border:1px solid #ca8a04; border-radius:10px; padding:10px 12px; color:#fde68a;"><b>🔁 Correct your mistakes and submit again.</b><div style="font-size:0.84rem; margin:2px 0 8px 0;">Use the hints above, redo those questions, then upload the corrected work.</div><button type="button" class="btn btn-purple btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Upload corrected work</button></div>' : '') +
       (redone ? '<div style="margin-top:8px; color:#86efac; font-size:0.86rem;">📤 Corrected work uploaded on ' + fmtDateTime(s.uploadedAt) + ' — waiting for your teacher to check it again.</div>' : '');
     } else if (f && f.status === 'missing') {

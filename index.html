@@ -12627,8 +12627,17 @@ function hwWindowText(t) {
 function missCfg() {
   var c = cloud.missCfg || {};
   return { on: !!c.on, n: Math.max(2, Number(c.n) || 3), since: Number(c.since) || 0,
+    // homework: lock after hwN missed (1 = the very first miss); hwOpen 'teacher' = only the teacher opens it again,
+    // 'auto' = it opens by itself once the missed work is uploaded
+    hwN: Math.max(1, Number(c.hwN) || 1), hwOpen: c.hwOpen === 'auto' ? 'auto' : 'teacher',
     redoBelow: c.redoBelow === undefined || c.redoBelow === null ? 70 : Math.max(0, Math.min(100, Number(c.redoBelow) || 0)),
     redoDays: Math.max(1, Number(c.redoDays) || 3) };
+}
+// the warning that goes with a "not submitted" remark (only while the lock is ON)
+function missLockWarnText() {
+  var c = missCfg();
+  if (!c.on) return '';
+  return '⚠️ Submit it now. If you do not submit your homework / assignments, your portal will be LOCKED and you will not be able to use your student login' + (c.hwOpen === 'teacher' ? ' until your teacher opens it again.' : '.');
 }
 // how much of the work is right, in % (the teacher's own %, else marks, else the question table)
 function hwPct(f, t) {
@@ -12739,7 +12748,7 @@ function hwGateTaskIds() {
   var ids = [], ml = currentUser.missLock;
   if (ml && ml.kind === 'hw' && Array.isArray(ml.tasks)) ids = ml.tasks.slice();
   var st = studentMissState();
-  if (st && st.hw >= st.n) ids = ids.concat(st.hwIds || []);
+  if (st && st.hw >= st.hwN) ids = ids.concat(st.hwIds || []);
   var seen = {};
   return ids.filter(function(id) {
     if (seen[id]) return false; seen[id] = 1;
@@ -12759,13 +12768,24 @@ function stuGate() {
     }
   }
   var ids = hwGateTaskIds();
+  var byTeacher = missCfg().hwOpen === 'teacher';
   if (ids.length) {
     var names = ids.map(function(id) { var t = hwCache.find(function(x) { return x.id === id; }); return t ? t.title : ''; }).filter(Boolean);
-    return { tab: 'hw', ids: ids, msg: '📝 Submit your pending homework / assignment first — then your portal opens.',
-      html: '<div class="card blink-live" style="border:2px solid #d97706; background:rgba(217,119,6,0.14); color:#fde68a;">' +
-        '<div style="font-size:1.05rem; font-weight:900;">🔒 Submit your homework first</div>' +
+    return { tab: 'hw', ids: ids, msg: '🔒 Your portal is locked — submit your pending homework / assignment first.',
+      html: '<div class="card blink-live" style="border:2px solid #dc2626; background:rgba(220,38,38,0.14); color:#fecaca;">' +
+        '<div style="font-size:1.05rem; font-weight:900;">🔒 Your portal is locked — submit your homework / assignment first</div>' +
         '<div style="margin-top:6px; font-size:0.9rem;">You did not submit: <b>' + names.map(esc).join(', ') + '</b>. Upload ' + (ids.length > 1 ? 'them' : 'it') + ' below (the upload is open for you even after the closing time).</div>' +
-        '<div style="margin-top:6px; font-size:0.86rem; color:#bbf7d0;">✅ Your portal opens by itself as soon as ' + (ids.length > 1 ? 'all of them are' : 'it is') + ' submitted.</div></div>' };
+        '<div style="margin-top:6px; font-size:0.86rem; color:#fde68a;">' + (byTeacher
+          ? '✅ After you submit, your teacher checks it and opens your student login again.'
+          : '✅ Your portal opens by itself as soon as ' + (ids.length > 1 ? 'all of them are' : 'it is') + ' submitted.') + '</div></div>' };
+  }
+  // everything is uploaded, but the teacher has not opened the portal yet
+  var ml = currentUser.missLock;
+  if (ml && ml.kind === 'hw' && byTeacher) {
+    return { tab: 'hw', ids: [], msg: '⏳ Your work is submitted — please wait until your teacher opens your portal.',
+      html: '<div class="card" style="border:2px solid #16a34a; background:rgba(22,163,74,0.12); color:#bbf7d0;">' +
+        '<div style="font-size:1.05rem; font-weight:900;">⏳ Submitted — waiting for your teacher</div>' +
+        '<div style="margin-top:6px; font-size:0.9rem;">Thank you for submitting your pending work. Your teacher will check it and open your student login again. Until then only this page opens.</div></div>' };
   }
   return null;
 }
@@ -12784,7 +12804,7 @@ async function runMissCheck(force) {
     r[1].forEach(function(s) { data.subs[s.taskId + '_' + s.studentId] = s; });
     r[2].forEach(function(f) { data.fb[f.taskId + '_' + f.studentId] = f; });
     DB.get(K.S).forEach(function(s) { data.done[s.testId + '_' + s.studentId] = 1; });
-    var users = DB.get(K.U), locked = [], opened = [], changed = false;
+    var users = DB.get(K.U), locked = [], opened = [], ready = [], changed = false;
     users.forEach(function(u) {
       if (!isActiveStu(u)) return;
       var ml = u.missLock;
@@ -12795,19 +12815,26 @@ async function runMissCheck(force) {
         locked.push((u.fullName || u.id) + ' (tests)'); changed = true; return;
       }
       if (ml && ml.kind === 'hw') {
-        // the student uploaded every missed work → the portal opens again, counting starts afresh
         var left = (ml.tasks || []).filter(function(id) { return !hwCleared(data.subs[id + '_' + u.id], data.fb[id + '_' + u.id]); });
-        if (!left.length) { delete u.missLock; u.missResetAt = Date.now(); opened.push(u.fullName || u.id); changed = true; }
+        if (!left.length) {
+          if (c.hwOpen === 'auto') { delete u.missLock; u.missResetAt = Date.now(); opened.push(u.fullName || u.id); changed = true; }
+          else {
+            // 'teacher': the work is in, the portal stays closed until the teacher presses 🔓 Unlock
+            if (!ml.readyAt) { ml.readyAt = Date.now(); changed = true; }
+            ready.push(u.fullName || u.id);
+          }
+        } else if (ml.readyAt) { delete ml.readyAt; changed = true; }
         return;
       }
-      if (st.hw >= c.n) {                                          // homework: only the Homework page opens until it is submitted
+      if (st.hw >= c.hwN) {                                        // homework: only the Homework page opens until it is submitted
         u.missLock = { at: Date.now(), kind: 'hw', hw: st.hw, tests: st.tests, tasks: st.hwIds };
         locked.push((u.fullName || u.id) + ' (homework)'); changed = true;
       }
     });
     if (changed) DB.set(K.U, users);
-    if (locked.length) showToast('🔒 Locked (missed ' + c.n + ' in a row): ' + locked.join(', ') + '. See menu → ⚙️ Lock & grade setting.', 'error');
+    if (locked.length) showToast('🔒 Locked (missed homework / tests): ' + locked.join(', ') + '. See menu → ⚙️ Lock & grade setting.', 'error');
     if (opened.length) showToast('🔓 Opened again (missed work submitted): ' + opened.join(', '), 'success');
+    if (ready.length) showToast('✅ Missed work submitted — waiting for you to unlock: ' + ready.join(', ') + '. Menu → ⚙️ Lock & grade setting → 🔓 Unlock.', 'success');
   } catch (e) {
     if (e && e.code === 'permission-denied') showToast('🔒 Miss lock could not read the homework records (permission denied). The Firestore rules need to allow the teacher to read hwsubs / hwfeedback.', 'error');
   }
@@ -12825,7 +12852,7 @@ function studentMissState() {
   DB.get(K.S).forEach(function(s) { if (s.studentId === currentUser.id) data.done[s.testId + '_' + s.studentId] = 1; });
   DB.get(K.ATT).forEach(function(a) { if (a.studentId === currentUser.id) data.done[a.testId + '_' + a.studentId] = 1; });
   var st = missStreaks(currentUser, data);
-  return { hw: st.hw, tests: st.tests, n: c.n, max: Math.max(st.hw, st.tests), hwIds: st.hwIds };
+  return { hw: st.hw, tests: st.tests, n: c.n, hwN: c.hwN, max: Math.max(st.hw, st.tests), hwIds: st.hwIds };
 }
 function missLockScreen(reasonHtml) {
   var o = document.getElementById('miss-lock');
@@ -12848,11 +12875,25 @@ function checkStudentMissLock() {
 // the warning on the student's home page (one miss before the lock)
 function missWarnHtml() {
   var s = studentMissState();
-  if (!s || !s.max || s.max >= s.n) return '';
-  var left = s.n - s.max;
-  return '<div class="card' + (left === 1 ? ' blink-live' : '') + '" style="border:1px solid #dc2626; background:rgba(220,38,38,0.12); color:#fecaca;">' +
-    '⚠️ <b>You have missed ' + s.max + ' ' + (s.hw >= s.tests ? 'homework / assignment(s)' : 'test(s)') + ' in a row.</b><br>' +
-    '<span style="font-size:0.86rem;">If you miss ' + left + ' more, your login will be <b>locked</b> and only your teacher can open it. Submit the next one on time!</span></div>';
+  if (!s) return '';
+  var out = '';
+  // homework still open and not uploaded: the warning before the closing time
+  if (hwCache && hwMineCache && currentUser) {
+    var open = hwCache.filter(function(t) { return hwIsForStudent(t, currentUser) && !hwNotOpenYet(t) && !hwOverdue(t) && !hwMineCache.subs[t.id] && t.dueAtMs; });
+    if (open.length && s.hw + 1 >= s.hwN) {
+      out += '<div class="card blink-live" style="border:1px solid #dc2626; background:rgba(220,38,38,0.12); color:#fecaca;">' +
+        '⚠️ <b>Submit your homework on time!</b> ' + open.map(function(t) { return '“' + esc(t.title) + '” (by ' + fmtDateTime(t.dueAtMs) + ')'; }).join(', ') + '<br>' +
+        '<span style="font-size:0.86rem;">If you do not submit it, your portal will be <b>locked</b> and you will not be able to use your student login' + (missCfg().hwOpen === 'teacher' ? ' until your teacher opens it again' : '') + '.</span></div>';
+    }
+  }
+  // tests: one miss before the lock
+  if (s.tests && s.tests < s.n) {
+    var left = s.n - s.tests;
+    out += '<div class="card' + (left === 1 ? ' blink-live' : '') + '" style="border:1px solid #dc2626; background:rgba(220,38,38,0.12); color:#fecaca;">' +
+      '⚠️ <b>You have missed ' + s.tests + ' online test(s) in a row.</b><br>' +
+      '<span style="font-size:0.86rem;">If you miss ' + left + ' more, your login will be <b>locked</b> and only your teacher can open it.</span></div>';
+  }
+  return out;
 }
 
 // ⚙️ the teacher's setting window (side menu → 🔒 Miss lock & grades)
@@ -12863,11 +12904,17 @@ function openMissRuleSetting() {
   var feeLocked = DB.get(K.U).filter(isActiveStu).map(function(u) { return { u: u, due: feeDueMonths(u) }; }).filter(function(x) { return x.due.length >= fc.n; });
   document.getElementById('row-editor-body').innerHTML =
     '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h3 style="margin:0;">⚙️ Lock &amp; grade setting <span style="font-size:0.7rem; color:var(--text-muted);">(teacher only)</span></h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
-    '<div class="card" style="margin-bottom:12px;"><b>1. Lock the login after misses in a row</b>' +
-      '<p style="font-size:0.82rem; color:var(--text-muted); margin:4px 0 10px 0;">Counted separately: homework + assignments, and online tests (MCQ / subjective). Not submitting before the closing time, or not doing a redo the teacher asked for in time, is a miss. A submission resets the count. Only misses <b>after you switch this on</b> are counted.</p>' +
+    '<div class="card" style="margin-bottom:12px;"><b>1. 🔒 Lock the student portal when work is not submitted</b>' +
+      '<p style="font-size:0.82rem; color:var(--text-muted); margin:4px 0 10px 0;">Not submitting before the closing time, or not doing a redo you asked for in time, is a miss. Only misses <b>after you switch this on</b> are counted. A locked student who logs in sees <b>only the Homework page</b> with “submit your work first”. The “not submitted” remark tells the students this too.</p>' +
       '<label class="col-pill" style="cursor:pointer; display:inline-flex; margin-bottom:8px;"><input type="checkbox" id="mr-on"' + (c.on ? ' checked' : '') + '> Switch the lock ON</label>' +
-      '<div class="grid-2"><div><label class="label">Lock after how many misses in a row</label><input type="number" id="mr-n" class="input" min="2" max="10" value="' + c.n + '"></div>' +
-      '<div><label class="label">Days given for a redo</label><input type="number" id="mr-days" class="input" min="1" max="30" value="' + c.redoDays + '"></div></div></div>' +
+      '<div class="grid-2">' +
+        '<div><label class="label">📝 Homework / assignments: lock after how many missed</label><input type="number" id="mr-hwn" class="input" min="1" max="10" value="' + c.hwN + '"></div>' +
+        '<div><label class="label">How the portal opens again</label><select id="mr-open" class="select">' +
+          '<option value="teacher"' + (c.hwOpen === 'teacher' ? ' selected' : '') + '>Only when I (the teacher) unlock it</option>' +
+          '<option value="auto"' + (c.hwOpen === 'auto' ? ' selected' : '') + '>By itself after the missed work is submitted</option></select></div>' +
+        '<div><label class="label">🖥️ Online tests: full lock after how many missed in a row</label><input type="number" id="mr-n" class="input" min="2" max="10" value="' + c.n + '"></div>' +
+        '<div><label class="label">Days given for a redo</label><input type="number" id="mr-days" class="input" min="1" max="30" value="' + c.redoDays + '"></div>' +
+      '</div></div>' +
     '<div class="card" style="margin-bottom:12px;"><b>2. Grade remark on checked homework</b>' +
       '<p style="font-size:0.82rem; color:var(--text-muted); margin:4px 0 10px 0;">🌟 <b>Excellent</b> = 100% • 👍 <b>Good</b> = 70% or more • 📘 <b>Average</b> = below 70% (gets the hints). The student sees it on the checked copy.</p>' +
       '<label class="label">Must correct &amp; submit again when below (%) — 0 = never</label><input type="number" id="mr-redo" class="input" min="0" max="100" value="' + c.redoBelow + '">' +
@@ -12890,7 +12937,10 @@ function openMissRuleSetting() {
     (locked.length ? locked.map(function(u) {
       var m = u.missLock || {};
       return '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #1e293b;">' +
-        '<span><b>' + esc(u.fullName || u.id) + '</b> ' + (m.kind === 'hw' ? '<span class="badge" style="background:#d97706; color:#fff;">📝 Homework page only</span>' : '<span class="badge" style="background:#dc2626; color:#fff;">🔒 Login locked</span>') + '<br><span style="font-size:0.74rem; color:var(--text-muted);">' + esc(u.studentClass || u.batch || '') + ' • since ' + fmtDateTime(m.at) + ' • missed: ' + (m.hw || 0) + ' homework, ' + (m.tests || 0) + ' tests' + (m.kind === 'hw' ? ' — opens by itself after the upload' : '') + '</span></span>' +
+        '<span><b>' + esc(u.fullName || u.id) + '</b> ' + (m.kind === 'hw' ? '<span class="badge" style="background:#d97706; color:#fff;">📝 Homework page only</span>' : '<span class="badge" style="background:#dc2626; color:#fff;">🔒 Login locked</span>') +
+          (m.readyAt ? ' <span class="badge blink-live" style="background:#16a34a; color:#fff;">✅ Work submitted — unlock?</span>' : '') +
+          '<br><span style="font-size:0.74rem; color:var(--text-muted);">' + esc(u.studentClass || u.batch || '') + ' • since ' + fmtDateTime(m.at) + ' • missed: ' + (m.hw || 0) + ' homework, ' + (m.tests || 0) + ' tests' +
+          (m.kind === 'hw' ? (c.hwOpen === 'auto' ? ' — opens by itself after the upload' : (m.readyAt ? ' — submitted on ' + fmtDateTime(m.readyAt) + ', waiting for you' : ' — has not submitted yet')) : '') + '</span></span>' +
         '<button type="button" class="btn btn-green btn-sm" onclick="unlockMissStudent(\'' + escA(u.id) + '\')">🔓 Unlock</button></div>';
     }).join('') : '<p style="color:var(--text-muted); margin:0;">No student is locked.</p>');
   document.getElementById('row-editor-modal').classList.remove('hidden');
@@ -12902,6 +12952,8 @@ function saveMissRule() {
   var rule = {
     on: on,
     n: Math.max(2, Math.min(10, Number(document.getElementById('mr-n').value) || 3)),
+    hwN: Math.max(1, Math.min(10, Number(document.getElementById('mr-hwn').value) || 1)),
+    hwOpen: document.getElementById('mr-open').value === 'auto' ? 'auto' : 'teacher',
     redoDays: Math.max(1, Math.min(30, Number(document.getElementById('mr-days').value) || 3)),
     redoBelow: Math.max(0, Math.min(100, Number(document.getElementById('mr-redo').value) || 0)),
     since: on ? (old.on && old.since ? old.since : Date.now()) : 0,   // counting starts when it is switched on
@@ -13756,8 +13808,32 @@ function markCheckedSeen(kind) {
   fbSeenSave(seen);
 }
 var checkedPopupDone = false;
+// ❌ new "not submitted" remarks (and the work is still not uploaded)
+function newMissingForStudent() {
+  if (!currentUser || !hwMineCache) return [];
+  var seen = fbSeenMap() || { _base: 0 };
+  return Object.keys(hwMineCache.fb).filter(function(tid) {
+    var f = hwMineCache.fb[tid], s = hwMineCache.subs[tid];
+    return f && f.status === 'missing' && Number(f.checkedAt || 0) > Number(seen['miss_' + tid] || seen._base || 0) && !(s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0));
+  });
+}
 function announceChecked() {
   if (cloud.role !== 'student' || checkedPopupDone || !hwMineCache || examState) return;
+  var miss = newMissingForStudent();
+  if (miss.length) {
+    // ⚠️ the "not submitted" remark comes as a red warning pop-up: submit now, or the portal is locked
+    checkedPopupDone = true;
+    var mT = miss.map(function(id) { var t = (hwCache || []).find(function(x) { return x.id === id; }); return t ? t.title : ''; }).filter(Boolean);
+    var fm = hwMineCache.fb[miss[0]] || {};
+    var seenM = fbSeenMap() || { _base: 0 };
+    miss.forEach(function(id) { seenM['miss_' + id] = Date.now(); });
+    fbSeenSave(seenM);
+    setTimeout(function() {
+      showHello('⚠️', 'Homework not submitted!', '<b>' + esc(mT.slice(0, 2).join(', ')) + '</b>' + (mT.length > 2 ? ' + ' + (mT.length - 2) + ' more' : '') + '<br>' +
+        (fm.remark ? '💬 ' + esc(fm.remark) + '<br>' : '') + '<b>' + esc(fm.lockWarn || missLockWarnText() || 'Submit it now, otherwise your portal will be locked.') + '</b>', '#dc2626', '#7f1d1d', 8000);
+    }, 3400);
+    return;
+  }
   var n = newCheckedForStudent();
   if (!n.hw.length && !n.ex.length) return;
   checkedPopupDone = true;
@@ -13868,6 +13944,7 @@ async function hwSaveManual(phone) {
   if (pv !== '' && (isNaN(Number(pv)) || Number(pv) < 0 || Number(pv) > 100)) { showToast('The % must be between 0 and 100.', 'error'); return; }
   fb.pct = pv === '' ? null : Number(pv);
   hwApplyRedoRule(fb, t);     // 🏅 grade + 🔁 must redo when below the teacher's %
+  if (fb.status === 'missing') fb.lockWarn = missLockWarnText() || '⚠️ Submit it now. If you do not submit your homework / assignments, your portal will be LOCKED and you will not be able to use your student login until your teacher opens it again.';
   try {
     await FBAPI.hwFeedbackSave(fb);
     closeModal();
@@ -13887,11 +13964,13 @@ async function hwRemarkMissing() {
   var d = hwDetail, t = d.task, k = HW_KINDS[hwKind(t)];
   var missing = hwStudentsOf(t).filter(function(u) { return !d.subs[u.id] && !d.fb[u.id]; });
   if (!missing.length) { showToast('Everyone has submitted or already has a remark.', 'success'); return; }
-  var txt = prompt('Remark for the ' + missing.length + ' student(s) who did not submit:', k.title + ' not submitted. Please complete it and show it to your teacher.');
+  var txt = prompt('Remark for the ' + missing.length + ' student(s) who did not submit (the lock warning is added by itself):', k.title + ' not submitted. Please complete it and submit it now.');
   if (txt === null) return;
+  // ⚠️ every "not submitted" remark carries the lock warning
+  var warn = missLockWarnText() || '⚠️ Submit it now. If you do not submit your homework / assignments, your portal will be LOCKED and you will not be able to use your student login until your teacher opens it again.';
   for (var i = 0; i < missing.length; i++) {
     try {
-      await FBAPI.hwFeedbackSave({ id: t.id + '_' + missing[i].id, taskId: t.id, studentId: missing[i].id, status: 'missing', marks: k.marks ? 0 : null, maxMarks: k.marks ? Number(t.maxMarks) : 0, remark: txt.trim(), summary: '', mistakes: [], hints: [], checkedAt: Date.now() });
+      await FBAPI.hwFeedbackSave({ id: t.id + '_' + missing[i].id, taskId: t.id, studentId: missing[i].id, status: 'missing', marks: k.marks ? 0 : null, maxMarks: k.marks ? Number(t.maxMarks) : 0, remark: txt.trim(), lockWarn: warn, summary: '', mistakes: [], hints: [], checkedAt: Date.now() });
     } catch (e) {}
   }
   showToast('Remark given to ' + missing.length + ' student(s).', 'success');
@@ -13920,7 +13999,10 @@ function renderStudentHwHtml(u) {
       (redoAsk && !redone ? '<div class="blink-live" style="margin-top:8px; background:rgba(234,179,8,0.12); border:1px solid #ca8a04; border-radius:10px; padding:10px 12px; color:#fde68a;"><b>🔁 Correct your mistakes and submit again.</b><div style="font-size:0.84rem; margin:2px 0 8px 0;">Use the hints above, redo those questions, then upload the corrected work.</div><button type="button" class="btn btn-purple btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Upload corrected work</button></div>' : '') +
       (redone ? '<div style="margin-top:8px; color:#86efac; font-size:0.86rem;">📤 Corrected work uploaded on ' + fmtDateTime(s.uploadedAt) + ' — waiting for your teacher to check it again.</div>' : '');
     } else if (f && f.status === 'missing') {
-      status = '<div style="background:rgba(220,38,38,0.12); border:1px solid #dc2626; border-radius:10px; padding:10px 12px; color:#fca5a5;"><b>❌ Not submitted</b>' + (f.remark ? '<div style="color:#fecaca; margin-top:4px;">💬 ' + esc(f.remark) + '</div>' : '') + '</div>';
+      var lateSub = s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0);
+      status = '<div style="background:rgba(220,38,38,0.12); border:1px solid #dc2626; border-radius:10px; padding:10px 12px; color:#fca5a5;"><b>❌ Not submitted</b>' + (f.remark ? '<div style="color:#fecaca; margin-top:4px;">💬 ' + esc(f.remark) + '</div>' : '') +
+        (!lateSub && (f.lockWarn || missLockWarnText()) ? '<div class="blink-live" style="margin-top:8px; padding:8px 10px; border-radius:8px; background:#7f1d1d; color:#fff; font-weight:700;">' + esc(f.lockWarn || missLockWarnText()) + '</div>' : '') +
+        (lateSub ? '<div style="color:#86efac; margin-top:6px;">📤 Submitted later on ' + fmtDateTime(s.uploadedAt) + ' — your teacher will check it.</div>' : (hwCanUpload(t) ? '<button type="button" class="btn btn-purple btn-sm" style="margin-top:8px;" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Submit it now (PDF)</button>' : '')) + '</div>';
     } else if (s) {
       status = '<div class="hw-done"><span class="hw-done-tick">✅ Submitted</span><span>' + fmtDateTime(s.uploadedAt) + (s.late ? ' <span class="badge badge-hard">late</span>' : '') + ' — waiting for your teacher to check it.</span></div>' +
         (hwCanUpload(t) ? '<button type="button" class="btn btn-slate btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">🔁 Replace PDF</button>' : '');

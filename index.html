@@ -27,7 +27,13 @@
 
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#b91c1c">
+  <!-- 📱 iPhone / iPad: "Add to Home Screen" opens the portal full screen like an app -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="ACSM Portal">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
   <style>
     :root {
@@ -2972,18 +2978,34 @@ function diffBadge(d) {
   return '<span class="badge ' + (d === 'Easy' ? 'badge-easy' : (d === 'Hard' ? 'badge-hard' : 'badge-medium')) + '">' + (d === 'Easy' ? '🟢 Easy' : (d === 'Hard' ? '🔴 Hard' : '🟡 Medium')) + '</span>';
 }
 
+// 📱 install as an app: the service worker (sw.js) + manifest make the browser offer "Install"
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  window.addEventListener('load', function() { navigator.serviceWorker.register('sw.js').catch(function() {}); });
+}
 var deferredInstallPrompt = null;
 window.addEventListener('beforeinstallprompt', function(e) {
   e.preventDefault();
   deferredInstallPrompt = e;
 });
+window.addEventListener('appinstalled', function() { deferredInstallPrompt = null; showToast('✅ ACSM Portal is installed — open it from the icon on your home screen.', 'success'); });
+function isInstalledApp() { return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; }
 function installApp() {
+  if (isInstalledApp()) { showToast('✅ You are already using the installed app.', 'success'); return; }
   if (deferredInstallPrompt) {
     deferredInstallPrompt.prompt();
-    deferredInstallPrompt = null;
-  } else {
-    showToast('To install: open your browser menu and choose "Install app" or "Add to Home Screen".', 'success');
+    deferredInstallPrompt.userChoice.then(function() { deferredInstallPrompt = null; }).catch(function() {});
+    return;
   }
+  // no automatic prompt (iPhone, or the browser is not ready yet): show the steps for this phone
+  var ua = navigator.userAgent || '';
+  var ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
+  var steps = ios
+    ? '<ol style="line-height:1.9; margin:0 0 0 18px; padding:0;"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button <span style="font-size:1.2rem;">⎙</span> (square with an arrow, at the bottom).</li><li>Scroll down → <b>Add to Home Screen</b> → <b>Add</b>.</li></ol>'
+    : '<ol style="line-height:1.9; margin:0 0 0 18px; padding:0;"><li>Open this page in <b>Google Chrome</b>.</li><li>Tap the <b>⋮</b> menu (top right).</li><li>Tap <b>Install app</b> (or <b>Add to Home screen</b>) → <b>Install</b>.</li></ol><p style="font-size:0.8rem; color:var(--text-muted); margin:8px 0 0 0;">If you do not see it yet, wait a few seconds after the page opens and press ⬇ Install App again.</p>';
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h3 style="margin:0;">📲 Install the ACSM app</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' + steps +
+    '<p style="font-size:0.82rem; margin:10px 0 0 0;">The ACSM icon then appears on your home screen and the portal opens full screen like an app.</p>';
+  document.getElementById('row-editor-modal').classList.remove('hidden');
 }
 
 var MONTH_KEYS = ['01','02','03','04','05','06','07','08','09','10','11','12'];

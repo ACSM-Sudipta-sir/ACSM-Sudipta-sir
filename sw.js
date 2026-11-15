@@ -2,7 +2,7 @@
 // The page is always taken fresh from the internet first, so every update reaches the students at once.
 // Only when there is no internet the last saved copy opens (the data itself still needs the internet).
 // Firebase / Google / other websites are never touched by this file.
-const CACHE = 'acsm-shell-v2';
+const CACHE = 'acsm-shell-v3';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', function (e) {

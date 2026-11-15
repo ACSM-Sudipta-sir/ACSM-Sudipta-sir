@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
-  <title>A Complete Solution of Mathematics — Complete Institute &amp; Exam Portal</title>
+  <title>ACSM- Sudipta Sir — A Complete Solution of Mathematics</title>
   <!-- KaTeX for Mathematical Equations -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
   <!-- stylish font for the home page (About text, highlights, title); Bengali keeps Noto Sans Bengali -->
@@ -26,13 +26,15 @@
   <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js">
 
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icons/icon-192.png">
-  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <meta name="theme-color" content="#b91c1c">
+  <link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+  <meta name="application-name" content="ACSM- Sudipta Sir">
+  <meta name="theme-color" content="#991b1b">
   <!-- 📱 iPhone / iPad: "Add to Home Screen" opens the portal full screen like an app -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="ACSM Portal">
+  <meta name="apple-mobile-web-app-title" content="ACSM- Sudipta Sir">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
   <style>
@@ -2983,15 +2985,40 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   window.addEventListener('load', function() { navigator.serviceWorker.register('sw.js').catch(function() {}); });
 }
 var deferredInstallPrompt = null;
+var APP_NAME = 'ACSM- Sudipta Sir';
 window.addEventListener('beforeinstallprompt', function(e) {
   e.preventDefault();
   deferredInstallPrompt = e;
+  setTimeout(showInstallBanner, 2500);      // Android / Windows / Chromebook (Chrome, Edge): one tap installs
 });
-window.addEventListener('appinstalled', function() { deferredInstallPrompt = null; showToast('✅ ACSM Portal is installed — open it from the icon on your home screen.', 'success'); });
+window.addEventListener('appinstalled', function() { deferredInstallPrompt = null; hideInstallBanner(); showToast('✅ ' + APP_NAME + ' is installed — open it from the icon on your home screen / desktop.', 'success'); });
+// iPhone / iPad: Apple never lets a website install itself — the banner shows the 2 taps (Share → Add to Home Screen)
+function isIosDevice() { var ua = navigator.userAgent || ''; return /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document); }
+window.addEventListener('load', function() { if (isIosDevice()) setTimeout(showInstallBanner, 4000); });
+// 📲 the install banner at the bottom: shows by itself (not again for 3 days after "Later")
+function showInstallBanner() {
+  if (isInstalledApp() || document.getElementById('install-banner') || (typeof examState !== 'undefined' && examState)) return;
+  try { if (Date.now() - Number(localStorage.getItem('acsm_install_later') || 0) < 3 * 86400000) return; } catch (e) {}
+  var ios = isIosDevice();
+  if (!ios && !deferredInstallPrompt) return;
+  var b = document.createElement('div');
+  b.id = 'install-banner';
+  b.style.cssText = 'position:fixed; left:12px; right:12px; bottom:calc(12px + env(safe-area-inset-bottom, 0px)); z-index:9600; max-width:520px; margin:0 auto; display:flex; gap:12px; align-items:center; padding:12px 14px; border-radius:16px; background:linear-gradient(135deg,#991b1b,#450a0a); color:#fff; box-shadow:0 12px 36px rgba(0,0,0,0.55); border:2px solid #fbbf24; animation:hpPop .45s cubic-bezier(.34,1.56,.64,1);';
+  b.innerHTML = '<img src="icons/icon-192.png" alt="" style="width:52px; height:52px; border-radius:12px; flex-shrink:0;">' +
+    '<div style="flex:1; min-width:0; font-size:0.86rem; line-height:1.4;"><b style="font-size:1rem;">📲 Install the ' + APP_NAME + ' app</b><br>' +
+      (ios ? 'Tap <b>Share</b> <span style="font-size:1.1rem;">⎙</span> ' + (/iPad/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent)) ? '(top right)' : '(at the bottom)') + ' → <b>Add to Home Screen</b> → <b>Add</b>.' : 'Opens full screen from an icon — faster, like a real app.') + '</div>' +
+    '<div style="display:flex; flex-direction:column; gap:6px; flex-shrink:0;">' +
+      (ios ? '' : '<button type="button" class="btn btn-amber btn-sm" onclick="installApp()">⬇ Install</button>') +
+      '<button type="button" class="btn btn-slate btn-xs" onclick="installLater()">' + (ios ? 'OK' : 'Later') + '</button></div>';
+  document.body.appendChild(b);
+}
+function hideInstallBanner() { var b = document.getElementById('install-banner'); if (b) b.remove(); }
+function installLater() { try { localStorage.setItem('acsm_install_later', String(Date.now())); } catch (e) {} hideInstallBanner(); }
 function isInstalledApp() { return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; }
 function installApp() {
   if (isInstalledApp()) { showToast('✅ You are already using the installed app.', 'success'); return; }
   if (deferredInstallPrompt) {
+    hideInstallBanner();
     deferredInstallPrompt.prompt();
     deferredInstallPrompt.userChoice.then(function() { deferredInstallPrompt = null; }).catch(function() {});
     return;
@@ -3003,8 +3030,8 @@ function installApp() {
     ? '<ol style="line-height:1.9; margin:0 0 0 18px; padding:0;"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button <span style="font-size:1.2rem;">⎙</span> (square with an arrow, at the bottom).</li><li>Scroll down → <b>Add to Home Screen</b> → <b>Add</b>.</li></ol>'
     : '<ol style="line-height:1.9; margin:0 0 0 18px; padding:0;"><li>Open this page in <b>Google Chrome</b>.</li><li>Tap the <b>⋮</b> menu (top right).</li><li>Tap <b>Install app</b> (or <b>Add to Home screen</b>) → <b>Install</b>.</li></ol><p style="font-size:0.8rem; color:var(--text-muted); margin:8px 0 0 0;">If you do not see it yet, wait a few seconds after the page opens and press ⬇ Install App again.</p>';
   document.getElementById('row-editor-body').innerHTML =
-    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h3 style="margin:0;">📲 Install the ACSM app</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' + steps +
-    '<p style="font-size:0.82rem; margin:10px 0 0 0;">The ACSM icon then appears on your home screen and the portal opens full screen like an app.</p>';
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h3 style="margin:0;">📲 Install ' + APP_NAME + '</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' + steps +
+    '<p style="font-size:0.82rem; margin:10px 0 0 0;">The <b>' + APP_NAME + '</b> icon then appears on your home screen and the portal opens full screen like an app. On a Windows computer: open the portal in Chrome or Edge → the ⊕ install icon at the right of the address bar → Install.</p>';
   document.getElementById('row-editor-modal').classList.remove('hidden');
 }
 

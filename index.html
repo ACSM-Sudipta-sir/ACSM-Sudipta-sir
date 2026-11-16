@@ -1336,6 +1336,7 @@
         <button type="button" onclick="openQuickOpenSetting()" class="btn btn-slate">⚙️ Quick open setting</button>
         <button type="button" onclick="openMissRuleSetting()" class="btn btn-slate">⚙️ Lock &amp; grade setting</button>
         <button type="button" onclick="openWishSetting()" class="btn btn-slate">🎉 Special-day wishes</button>
+        <button type="button" onclick="askNotifyPermission()" class="btn btn-slate">🔔 Phone notifications</button>
         <button type="button" onclick="logoutNow()" class="btn btn-slate" style="color:#f87171;">⎋ Logout</button>
       </div>
     </aside>
@@ -1878,6 +1879,7 @@ function clearPrivateCache() {
   chatMsgs = null; chatSel = '';
   classStatsCache = {}; classStatsAt = 0; classStatsLast = {};
   deviceAll = null; feeUnlocked = false;
+  dataSeenOnce = {};          // after a logout / login the first data is not "new" again
 }
 
 // --- live refresh when another device changes data ---
@@ -1918,15 +1920,74 @@ function refreshLiveViews() {
   }, 300);
 }
 
+var dataSeenOnce = {};       // how many times each list has arrived since login (the first time is not "new")
+
+// 🔔 PHONE NOTIFICATIONS: a new notice / exam / message shows on the phone's screen (notification bar, sound /
+// vibration) while the app is open or was used recently. Tapping it opens the app.
+// (When the app is fully closed, a notification needs a small server — Firebase Cloud Functions, Blaze plan.)
+function notifySupported() { return 'Notification' in window && 'serviceWorker' in navigator; }
+function sysNotify(title, body, tag, tab) {
+  try {
+    if (!notifySupported() || Notification.permission !== 'granted') return;
+    if (!document.hidden && document.hasFocus && document.hasFocus()) return;     // on screen already: the toast is enough
+    navigator.serviceWorker.ready.then(function(reg) {
+      reg.showNotification(title, { body: body || '', icon: 'icons/icon-192.png?v=3', badge: 'icons/favicon-64.png?v=3', tag: tag || 'acsm', renotify: true, vibrate: [200, 100, 200], data: { tab: tab || '' } });
+    }).catch(function() {});
+  } catch (e) {}
+}
+function askNotifyPermission() {
+  if (!notifySupported()) {
+    showToast(isIosDevice() ? '📲 On iPhone / iPad: first install the app (Share ⎙ → Add to Home Screen), open it from the icon, then turn on notifications.' : 'This browser cannot show notifications. Please use Google Chrome.', 'error');
+    return;
+  }
+  Notification.requestPermission().then(function(p) {
+    if (p === 'granted') {
+      showToast('🔔 Notifications are ON.', 'success');
+      navigator.serviceWorker.ready.then(function(reg) { reg.showNotification('🔔 ACSM- Sudipta Sir', { body: 'Notifications are on — new notices, exams and messages will show here.', icon: 'icons/icon-192.png?v=3', tag: 'acsm-test' }); }).catch(function() {});
+    } else showToast('Notifications are blocked. To allow them: phone Settings → Apps → (your browser / ACSM app) → Notifications → Allow.', 'error');
+    if (cloud.role === 'student') renderStudentDashContent();
+  });
+}
+// the card on the student's home page while notifications are not switched on
+function notifyCardHtml() {
+  if (!notifySupported() || Notification.permission === 'granted') return isIosDevice() && !notifySupported() && !isInstalledApp()
+    ? '<div class="card" style="border:1px solid #3b82f6; background:rgba(59,130,246,0.10); font-size:0.86rem;">🔔 To get notifications on iPhone / iPad: install the app first — <b>Share ⎙ → Add to Home Screen</b> — and open it from the icon.</div>' : '';
+  if (Notification.permission === 'denied') return '';
+  return '<div class="card" style="display:flex; gap:10px; align-items:center; border:1px solid #3b82f6; background:rgba(59,130,246,0.10);">' +
+    '<span style="font-size:1.8rem;">🔔</span><span style="flex:1; font-size:0.86rem;"><b>Turn on notifications</b><br>Get new notices, exams and messages from your teacher on your phone screen.</span>' +
+    '<button type="button" class="btn btn-blue btn-sm" onclick="askNotifyPermission()">Turn on</button></div>';
+}
+
 window.onCloudData = function(name, arr, pending) {
   var k = KEY_BY_COLL[name];
   if (!k) return;
-  if (name === 'alerts' && cloud.role === 'student' && cloud.ready) {
+  // only what arrives AFTER the first load is "new" (no pile of notifications when the app opens)
+  var hadBefore = Store.mem[k] !== undefined && Store.mem[k] !== null && (dataSeenOnce[name] = dataSeenOnce[name] || 0) > 0;
+  dataSeenOnce[name] = (dataSeenOnce[name] || 0) + 1;
+  if (name === 'alerts' && cloud.role === 'student' && cloud.ready && hadBefore) {
     try {
       var before = {};
       JSON.parse(Store.mem[k] || '[]').forEach(function(x) { before[x.id] = 1; });
       arr.forEach(function(n) {
-        if (!before[n.id] && noticeIsForMe(n)) showToast('📢 New notice: ' + (n.title || 'Please check the Notices tab') + (n.pdf ? ' 📎 (with a PDF)' : ''), 'success');
+        if (!before[n.id] && noticeIsForMe(n)) {
+          showToast('📢 New notice: ' + (n.title || 'Please check the Notices tab') + (n.pdf ? ' 📎 (with a PDF)' : ''), 'success');
+          sysNotify('📢 New notice: ' + (n.title || 'ACSM'), String(n.body || 'Open the Notices tab to read it.').slice(0, 140), 'notice-' + n.id, 'notices');
+        }
+      });
+    } catch (e) {}
+  }
+  // 🔔 a new exam for this student
+  if (name === 'tests' && cloud.role === 'student' && cloud.ready && currentUser && hadBefore) {
+    try {
+      var oldT = {};
+      JSON.parse(Store.mem[k] || '[]').forEach(function(x) { oldT[x.id] = 1; });
+      var mine = {};
+      Store.mem[k] = JSON.stringify(arr);
+      sdAssignedTests(currentUser, currentUser.studentClass || currentUser.batch || 'Class 12').forEach(function(t) { mine[t.id] = 1; });
+      arr.forEach(function(t) {
+        if (oldT[t.id] || !mine[t.id]) return;
+        showToast('📝 New exam: ' + (t.title || 'Exam'), 'success');
+        sysNotify('📝 New exam: ' + (t.title || 'Exam'), t.startAtMs ? 'Starts ' + fmtDateTime(t.startAtMs) + (t.endAtMs ? ' • closes ' + fmtDateTime(t.endAtMs) : '') : 'Open the app to see it.', 'test-' + t.id, 'tests');
       });
     } catch (e) {}
   }
@@ -2984,7 +3045,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261116213718';
+var APP_BUILD = '20261116214304';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -5887,7 +5948,7 @@ function stuHomeTodoHtml(u, allTests) {
       return redo || (!s && !hwOverdue(t));
     }).sort(function(a, b) { return (a.dueAtMs || 9e15) - (b.dueAtMs || 9e15); });
   }
-  var h = festBannerHtml(u) + missWarnHtml();   // 🎉 today's wish • ⚠️ "one more miss and your login is locked"
+  var h = festBannerHtml(u) + notifyCardHtml() + missWarnHtml();   // 🎉 today's wish • ⚠️ "one more miss and your login is locked"
   if (live.length) h += '<div class="sd-section-title">🔴 Exam open now</div>' + live.map(function(t) { return sdTestCard(t, null); }).join('');
   if (hwDue.length) {
     h += '<div class="sd-section-title">📒 To submit</div>' + hwDue.map(function(t) {
@@ -8558,7 +8619,9 @@ window.onChatData = function(list) {
       if (old[m.id]) return;
       if (cloud.role === 'admin' && m.needSir) showToast('❗ ' + esc(m.name || m.studentId) + ' did not understand the AI hint — please help in 💬 Chat.', 'error');
       else if (cloud.role === 'admin' && m.from === 'student' && !(currentAdminTab === 'chat' && chatSel === m.studentId)) showToast('💬 ' + esc(m.name || m.studentId) + ': ' + esc(String(m.text || '📷 photo').slice(0, 70)), 'success');
+      if (cloud.role === 'admin' && m.from === 'student') sysNotify('💬 ' + (m.name || m.studentId), String(m.text || '📷 photo').slice(0, 140), 'chat-' + m.studentId, 'chat');
       if (cloud.role === 'student' && m.from === 'teacher' && studentTab !== 'chat') showToast('💬 Teacher: ' + esc(String(m.text || '').slice(0, 70)), 'success');
+      if (cloud.role === 'student' && m.from === 'teacher') sysNotify('💬 Message from your teacher', String(m.text || '📷 photo').slice(0, 140), 'chat-teacher', 'chat');
     });
   }
   updateChatBadges();

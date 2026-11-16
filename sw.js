@@ -2,7 +2,7 @@
 // The page is always taken fresh from the internet first, so every update reaches the students at once.
 // Only when there is no internet the last saved copy opens (the data itself still needs the internet).
 // Firebase / Google / other websites are never touched by this file.
-const CACHE = 'acsm-shell-v4';
+const CACHE = 'acsm-shell-v5';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', function (e) {
@@ -33,4 +33,13 @@ self.addEventListener('fetch', function (e) {
       return caches.match(req).then(function (hit) { return hit || caches.match('./index.html'); });
     })
   );
+});
+
+// 🔔 tapping a notification: the open app comes to the front (or the app opens)
+self.addEventListener('notificationclick', function (e) {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+    for (const c of list) { if ('focus' in c) return c.focus(); }
+    return self.clients.openWindow('./');
+  }));
 });

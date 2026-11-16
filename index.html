@@ -2092,6 +2092,7 @@ window.onCloudReady = function() {
     // 🔒 miss lock: checked a little after opening, then every 10 minutes while the teacher's app is open
     setTimeout(function() { runMissCheck(true); }, 8000);
     setTimeout(autoGalleryToDrive, 12000);   // ☁️ slideshow photos → Google Drive by themselves (when the Drive script allows it)
+    setTimeout(shrinkGalleryInDb, 30000);    // 🪶 photos still in the database: made light (~45 KB)
     if (!window._missTimer) window._missTimer = setInterval(function() { runMissCheck(false); }, 600000);
   } else {
     showScreen('view-student-dash');
@@ -3061,7 +3062,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261116214904';
+var APP_BUILD = '20261116215913';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -4211,6 +4212,53 @@ async function moveGalleryToDrive(auto) {
   if (moved) showToast('☁️ ' + moved + ' photo(s) are now in your Google Drive.', 'success');
 }
 
+// 🪶 while the photos are still in the database: each one is kept at ~45 KB or less (light for every student)
+var GAL_DB_MAX_KB = 45;
+var GAL_STEPS = [[900, 0.72], [820, 0.66], [740, 0.62], [660, 0.58], [600, 0.55], [540, 0.5], [480, 0.48]];
+function shrinkDataUrl(src, maxKb, done) {
+  var img = new Image();
+  img.onload = function() {
+    var i = 0, best = null;
+    (function next() {
+      if (i >= GAL_STEPS.length) { done(best); return; }
+      var s = GAL_STEPS[i++], k = Math.min(1, s[0] / Math.max(img.width, img.height));
+      var c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+      var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+      best = c.toDataURL('image/jpeg', s[1]);
+      if (photoKb(best) <= maxKb) done(best); else next();
+    })();
+  };
+  img.onerror = function() { done(null); };
+  img.src = src;
+}
+function shrinkFileToKb(file, maxKb, done) {
+  var r = new FileReader();
+  r.onload = function() { shrinkDataUrl(String(r.result), maxKb, done); };
+  r.onerror = function() { done(null); };
+  r.readAsDataURL(file);
+}
+// the teacher's portal makes the old (bigger) database photos light, one after another, by itself
+var galShrinkDone = false;
+async function shrinkGalleryInDb() {
+  if (galShrinkDone || cloud.role !== 'admin' || !cloud.ready) return;
+  if (window.FBAPI && FBAPI.isLoaded && !FBAPI.isLoaded('gallery')) { setTimeout(shrinkGalleryInDb, 15000); return; }
+  galShrinkDone = true;
+  var big = DB.get(K.GAL).filter(function(g) { return g.img && !g.fileId && photoKb(g.img) > GAL_DB_MAX_KB; });
+  if (!big.length) return;
+  var saved = 0, before = 0, after = 0;
+  for (var i = 0; i < big.length; i++) {
+    var small = await new Promise(function(res) { shrinkDataUrl(big[i].img, GAL_DB_MAX_KB, res); });
+    if (!small || photoKb(small) >= photoKb(big[i].img)) continue;
+    before += photoKb(big[i].img); after += photoKb(small);
+    var g = DB.get(K.GAL);
+    g.forEach(function(x) { if (x.id === big[i].id) x.img = small; });
+    DB.set(K.GAL, g);
+    saved++;
+  }
+  if (saved) showToast('🪶 ' + saved + ' slideshow photo(s) made lighter: ' + before + ' KB → ' + after + ' KB. Students now load them much faster.', 'success');
+}
+
 // 🤖 on the teacher's login: is the Drive script new enough for photos? Yes → the photos move by themselves.
 // No → a step-by-step card on the Home page (the script can only be updated from the teacher's own Google account).
 var galScriptState = '';     // '' = not checked • 'ok' • 'old' • 'nodrive' • 'down'
@@ -4306,8 +4354,8 @@ function handleGalleryUpload(e) {
             else showToast('Drive did not answer — this photo is kept in the portal.', 'error');
           }
         }
-        // no Drive (or it failed): kept in the database as before, a smaller copy
-        if (!item.fileId) item.img = drive ? await new Promise(function(res) { compressImage(f, 680, 0.72, res); }) : dataUrl;
+        // no Drive (or it failed): kept in the database — a light copy of ~45 KB or less
+        if (!item.fileId) item.img = await new Promise(function(res) { shrinkFileToKb(f, GAL_DB_MAX_KB, res); });
         if (item.fileId || item.img) added.push(item);
       }
       pending--;
@@ -12244,6 +12292,9 @@ var DRIVE_SCRIPT = String.raw`// ===============================================
 const ADMIN_KEY = 'CHANGE-ME-to-a-long-secret';
 const ROOT = 'ACSM Portal Files';
 const MAX_MB = 35;
+// the slideshow / gallery photos go into the teacher's "ACSM Photo" folder:
+// https://drive.google.com/drive/folders/1x9hg5jRCL48oMLIqXMEWy0WJ8gSapZ0_
+const PHOTO_FOLDER_ID = '1x9hg5jRCL48oMLIqXMEWy0WJ8gSapZ0_';
 
 function doPost(e) {
   try {
@@ -12301,7 +12352,9 @@ function uploadPhoto(req) {
   if (bytes.length > 5 * 1024 * 1024) return { ok: false, error: 'file too big' };
   const jpg = bytes[0] === -1 && bytes[1] === -40, png = bytes[0] === -119 && bytes[1] === 80;
   if (!jpg && !png) return { ok: false, error: 'not a photo' };
-  const folder = folderOf(['Public', 'Gallery']);
+  // the teacher's own "ACSM Photo" folder (if this Google account can use it), else ACSM Portal Files / Public / Gallery
+  let folder;
+  try { folder = DriveApp.getFolderById(PHOTO_FOLDER_ID); } catch (err) { folder = folderOf(['Public', 'Gallery']); }
   const name = clean(req.name).replace(/\.(jpe?g|png)$/i, '') + (png ? '.png' : '.jpg');
   const file = folder.createFile(Utilities.newBlob(bytes, png ? 'image/png' : 'image/jpeg', name));
   file.setDescription('acsm-public');

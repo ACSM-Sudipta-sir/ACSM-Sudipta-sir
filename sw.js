@@ -2,7 +2,7 @@
 // The page is always taken fresh from the internet first, so every update reaches the students at once.
 // Only when there is no internet the last saved copy opens (the data itself still needs the internet).
 // Firebase / Google / other websites are never touched by this file.
-const CACHE = 'acsm-shell-v3';
+const CACHE = 'acsm-shell-v4';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', function (e) {
@@ -21,8 +21,12 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;          // Firebase, Google Drive, YouTube …: straight to the internet
+  if (/version\.json$/.test(url.pathname)) return;          // the update check always asks the internet itself
+  // the page itself (and the app file): always asked again from the internet ("no-cache" = is there a newer one?),
+  // so a new version is never hidden behind a copy the phone kept
+  const fresh = req.mode === 'navigate' || /\.(html|webmanifest)$/.test(url.pathname) || /\/$/.test(url.pathname);
   e.respondWith(
-    fetch(req).then(function (res) {
+    (fresh ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(req)).then(function (res) {
       if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then(function (c) { c.put(req, copy); }); }
       return res;
     }).catch(function () {

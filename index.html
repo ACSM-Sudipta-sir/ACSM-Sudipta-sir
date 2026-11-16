@@ -2981,6 +2981,47 @@ function diffBadge(d) {
 }
 
 // 📱 install as an app: the service worker (sw.js) + manifest make the browser offer "Install"
+// 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
+// sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
+// and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
+var APP_BUILD = '20261116091006';
+var updateShownFor = '';
+function checkAppUpdate() {
+  if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
+  fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(function(r) { return r.ok ? r.json() : null; }).then(function(j) {
+    if (j && j.v && String(j.v) > APP_BUILD) showUpdateBanner(String(j.v));
+  }).catch(function() {});
+}
+function showUpdateBanner(v) {
+  if (updateShownFor === v || document.getElementById('update-banner')) return;
+  if (typeof examState !== 'undefined' && examState) return;          // never during an exam (asked again later)
+  updateShownFor = v;
+  var b = document.createElement('div');
+  b.id = 'update-banner';
+  b.style.cssText = 'position:fixed; left:12px; right:12px; top:calc(10px + env(safe-area-inset-top, 0px)); z-index:9700; max-width:520px; margin:0 auto; display:flex; gap:10px; align-items:center; padding:10px 12px; border-radius:14px; background:linear-gradient(135deg,#1d4ed8,#7c3aed); color:#fff; box-shadow:0 12px 36px rgba(0,0,0,0.5); border:2px solid #93c5fd; animation:hpPop .45s cubic-bezier(.34,1.56,.64,1);';
+  b.innerHTML = '<img src="icons/icon-192.png?v=3" alt="" style="width:40px; height:40px; border-radius:10px; background:#fff; flex-shrink:0;">' +
+    '<div style="flex:1; min-width:0; font-size:0.86rem; line-height:1.35;"><b style="font-size:0.98rem;">🔄 A new update is ready</b><br>Tap <b>Update now</b> to get the newest version of ACSM- Sudipta Sir.</div>' +
+    '<div style="display:flex; flex-direction:column; gap:5px; flex-shrink:0;"><button type="button" class="btn btn-amber btn-sm" onclick="applyAppUpdate(\'' + v + '\')">Update now</button>' +
+    '<button type="button" class="btn btn-slate btn-xs" onclick="var x=document.getElementById(\'update-banner\'); if(x) x.remove();">Later</button></div>';
+  document.body.appendChild(b);
+}
+async function applyAppUpdate(v) {
+  var b = document.getElementById('update-banner');
+  if (b) b.innerHTML = '<div style="flex:1; text-align:center; font-weight:800;">⏳ Updating…</div>';
+  try { var regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(function(r) { return r.update().catch(function() {}); })); } catch (e) {}
+  try { var keys = await caches.keys(); await Promise.all(keys.map(function(k) { return caches.delete(k); })); } catch (e) {}
+  try { sessionStorage.setItem('acsm_just_updated', '1'); } catch (e) {}
+  location.replace(location.pathname + '?u=' + encodeURIComponent(v) + location.hash);    // a fresh copy, not the saved one
+}
+window.addEventListener('load', function() {
+  // after an update: tidy the address, say it is done
+  if (/[?&]u=/.test(location.search) && !/oobCode|mode=/.test(location.search)) { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {} }
+  try { if (sessionStorage.getItem('acsm_just_updated')) { sessionStorage.removeItem('acsm_just_updated'); setTimeout(function() { showToast('✅ Updated — you have the newest version.', 'success'); }, 2500); } } catch (e) {}
+  setTimeout(checkAppUpdate, 6000);
+  setInterval(checkAppUpdate, 180000);             // every 3 minutes while it is open
+});
+document.addEventListener('visibilitychange', function() { if (document.visibilityState === 'visible') checkAppUpdate(); });
+
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   window.addEventListener('load', function() { navigator.serviceWorker.register('sw.js').catch(function() {}); });
 }

@@ -3064,7 +3064,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261116222418';
+var APP_BUILD = '20261117000710';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -13749,19 +13749,29 @@ function hwCopyPrompt() {
     '"questions":[{"q":"Q1 (i)–(x) MCQ","verdict":"correct","note":"b, b, c, c, c, c, b, b, c, c"},{"q":"Q3(c) Balls","verdict":"slip","note":"answers correct, slip in (iii) — see E1"},{"q":"Q5(a) Building & lamp post","verdict":"wrong","note":"AB taken as 65 m instead of 60 m — see E3, E4"},{"q":"Q7","verdict":"skipped","note":""}],' +
     '"errors":[{"tag":"E1","q":"Q3(c)(iii)","severity":"slip","title":"statement does not match the question","written":"Probability of neither red nor white ball = 1 − 14/20 = 3/10","correct":"The question asks for neither green nor white: green + white = 9 + 5 = 14, so P = 1 − 14/20 = 3/10","feedback":"The number 14 and the answer are right, but the words say red where it should be green. Write the event exactly as asked.","page":7,"box":[60,40,210,960]},' +
     '{"tag":"E4","q":"Q5(a)(i)","severity":"wrong","title":"wrong value of AB","written":"tan 60° = 65/CB, so CB = 65/√3 = 37.53 m","correct":"AB = 60 m (given). tan 60° = 60/BC, so BC = 60/√3 = 20√3 = 34.64 m","feedback":"A copying mistake: 60 became 65. The method is right, only the substitution fails. Underline the given values and check them against the figure before substituting.","page":9,"box":[150,80,470,900]}],' +
-    '"missed":["Q2: the final check of the answer","Q5: the unit (cm²) in the answer"],"hints":["Q5(a): Step 1: write the given AB = 60 m under the figure. Step 2: in triangle ABC use tan 60° = AB/BC. Step 3: solve for BC and keep it as 20√3. Step 4: use BC in part (ii)."],' +
+    '"missed":["Q2: the final check of the answer","Q5: the unit (cm²) in the answer"],"hints":["Q5(a): Idea: in right triangle ABC the height AB and the angle 60° are known, so use tan. Step 1: AB = 60 m is given (you took 65 m — that is the mistake). Step 2: tan 60° = AB/BC, so √3 = 60/BC. Step 3: BC = 60/√3 = (60 × √3)/(√3 × √3) = 60√3/3 = 20√3 m. Step 4: for part (ii) use the same BC in triangle DBC: tan 30° = DC/BC, so 1/√3 = DC/(20√3). Step 5: now finish this calculation yourself and write DC with the unit (m)."],' +
     '"strengths":["all identity proofs are complete with reasons in brackets","figures are drawn for every Heights & Distances problem"],"advice":["Show the favourable outcomes in probability — this is where method marks are given.","Copy the data carefully: underline the given values before substituting.","Read neither…nor, at least and colour words twice."],' +
     '"skipped":["Q7"],"resubmit":true}]\n\n' +
     'Check EVERY question of the task one by one, line by line. Re-work every answer yourself and compare it with the script.\n' +
     fbDetailPromptRules() +
     '- "skipped": the questions the student did NOT attempt at all (e.g. ["Q4","Q7"]).\n' +
     '- "missed": the parts the student left out in an attempted answer (a step, a reason, the final answer, the unit, a diagram, the check …). Start every line with the question number ("Q2: …").\n' +
-    '- "hints": for every question with a mistake or a missed part, a DETAILED hint broken into small steps ("Step 1: … Step 2: … Step 3: …") that leads the student to the right method — but do NOT write the final answer.\n' +
+    '- "hints": for EVERY question with a mistake, a missed part or left out (skipped), one hint per question, starting with the question number ("Q5(a): …").\n' + HINT80_RULE +
     '- "resubmit": true if the student should correct the mistakes and submit again (an important question wrong or missing), otherwise false.\n' +
     '- "percent": how much of the WHOLE task is done correctly, 0–100 (100 = everything right and complete; questions left out count as 0). Be exact — 100 only when nothing is wrong or missing.\n' +
     'Rules: write simply, speaking to the student. If a page is blank, unreadable or the work is missing, say so in "remark"' + (k.marks ? ' and give 0 marks' : '') + '. Use LaTeX like \\(x^2\\) for maths. Return valid JSON only.';
   copyTextSafe(prompt, '🤖 Prompt copied! Paste it in Claude / Gemini together with the downloaded PDFs.');
 }
+
+// 💡 the hint rule for every copy-check prompt: the hint is a worked solution about 80% done — only the last step(s) and the final answer are left
+var HINT80_RULE =
+  '- HOW TO WRITE A HINT (very important): the hint must be a WORKED SOLUTION that is about 80% complete, so even a weak student can follow it and finish alone.\n' +
+  '  • Start with the idea / formula / theorem to use and WHY (e.g. "Idea: use tan θ = opposite/adjacent because the height and the angle are given").\n' +
+  '  • Then write the actual working step by step with the numbers of that question ("Step 1: … Step 2: … Step 3: …"): substitute the values, simplify, and show every intermediate line — do not just describe what to do.\n' +
+  '  • Where the student went wrong, show the correct line next to it ("You wrote …, it should be … because …").\n' +
+  '  • STOP before the last step(s): leave only the final calculation and the final answer for the student, ending with a line like "Step 5: now finish this calculation yourself and write the answer with the unit."\n' +
+  '  • Proofs: write about 80% of the proof (the main statements with reasons) and leave the last 1–2 lines and the conclusion. Constructions / graphs: give every step except the last one.\n' +
+  '  • Usually 5–8 steps per question. Never write the final answer itself.\n';
 
 function openHwPasteModal() {
   hwPreview = [];
@@ -16106,11 +16116,12 @@ function examCopyPrompt(testId) {
     'FOR EACH STUDENT:\n' +
     '1. Open the PDF whose file name has their studentId and read EVERY page carefully.\n' +
     '2. For every question find the student\'s answer, compare it with the model answer / solution and give marks from 0 to the full marks of that question. Give partial marks for correct steps; 0 if missing, blank or a wrong method.\n' +
-    '3. If a question is not fully correct, write "mistake": EXACTLY where (which line / step) and what is wrong, quoting what the student wrote, plus what part was left out; and "hint": a DETAILED hint in small steps ("Step 1: … Step 2: … Step 3: …") that leads to the right method — NOT the final answer. Give every question a "verdict" ("correct" | "slip" | "wrong" | "skipped") and a short "note".\n' +
+    '3. If a question is not fully correct, write "mistake": EXACTLY where (which line / step) and what is wrong, quoting what the student wrote, plus what part was left out; and "hint": a worked solution about 80% complete (see HOW TO WRITE A HINT below) — NOT the final answer. Give every question a "verdict" ("correct" | "slip" | "wrong" | "skipped") and a short "note".\n' +
     '4. Write a short "remark" (2 sentences, encouraging, speaking to the student).\n' +
     '5. "resubmit": true if the student should correct the mistakes and upload again (any question below half marks, or missing work); otherwise false.\n' +
     '6. If the PDF is unreadable or the wrong file, give 0 marks and say so in "remark" with "resubmit": true.\n' +
     '7. Also give the detailed report:\n' + fbDetailPromptRules() + '\n' +
+    HINT80_RULE + '\n' +
     'Reply with ONLY a JSON array (no other text, no markdown), one object per student:\n' +
     '[{"studentId":"9876543210","questions":[{"qNo":1,"awarded":3,"verdict":"slip","note":"answer right, sign slip in step 2 — see E1","mistake":"sign error in step 2","hint":"Step 1: check the derivative of \\\\(\\\\cos x\\\\). Step 2: …"}],"remark":"...",' +
     '"overall":"2–3 sentences on the whole sheet","errors":[{"tag":"E1","q":"Q1","severity":"slip","title":"sign slip in step 2","written":"what the student wrote","correct":"the correct working","feedback":"why and how to avoid it","page":2,"box":[120,60,380,940]}],' +

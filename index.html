@@ -1332,6 +1332,7 @@
         <button type="button" onclick="switchAdminTab('inputq')" id="tab-btn-inputq" class="btn btn-slate">📥 Input Questions</button>
         <button type="button" onclick="switchAdminTab('qbank')" id="tab-btn-qbank" class="btn btn-slate">🗂️ Question Bank</button>
         <button type="button" onclick="switchAdminTab('pyq')" id="tab-btn-pyq" class="btn btn-slate">📚 PYQ Papers</button>
+        <button type="button" onclick="switchAdminTab('videos')" id="tab-btn-videos" class="btn btn-slate">📹 Class Videos</button>
         <button type="button" onclick="switchAdminTab('fees')" id="tab-btn-fees" class="btn btn-slate">💳 Pay</button>
         <button type="button" onclick="switchAdminTab('backup')" id="tab-btn-backup" class="btn btn-slate">💾 Backup &amp; Restore</button>
         <button type="button" onclick="switchAdminTab('devices')" id="tab-btn-devices" class="btn btn-slate">📱 Devices <span id="nav-dev-badge" class="nav-badge hidden" style="position:static; margin-left:auto;">0</span></button>
@@ -2099,6 +2100,7 @@ window.onCloudReady = function() {
     renderStudentDashContent();
     startAttemptWatch();
     loadHw(false);                                   // homework data also feeds the 🔒 miss count
+    setTimeout(function() { loadPyq(false); }, 4000);   // 📹 the class-video list (for the NEW count in the menu)
     setTimeout(checkStudentMissLock, 6000);
     if (!examState) greetAfterLogin();
   }
@@ -3062,7 +3064,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261116215913';
+var APP_BUILD = '20261116222418';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -3671,7 +3673,7 @@ function switchAdminTab(tab) {
   if (/^tests|^jee-tests/.test(tab)) markExamSeen();   // the teacher is looking at the results now
   if (tab === 'tests-mcq') testsView = 'MCQ';
   else if (tab === 'tests-subj') testsView = 'Subjective';
-  var tabs = ['home', 'dash', 'notices', 'inputq', 'qbank', 'tests', 'tests-mcq', 'tests-subj', 'jee', 'students', 'fees', 'results', 'analytics', 'hw', 'pyq', 'formula', 'drive', 'backup', 'chat', 'devices', 'books', 'ranker', 'complaints'];
+  var tabs = ['home', 'dash', 'notices', 'inputq', 'qbank', 'tests', 'tests-mcq', 'tests-subj', 'jee', 'students', 'fees', 'results', 'analytics', 'hw', 'pyq', 'videos', 'formula', 'drive', 'backup', 'chat', 'devices', 'books', 'ranker', 'complaints'];
   for (var i = 0; i < tabs.length; i++) {
     var t = tabs[i];
     var b = document.getElementById('tab-btn-' + t);
@@ -3698,6 +3700,7 @@ function switchAdminTab(tab) {
   else if (tab === 'complaints') renderAdminComplaintsContent();
   else if (tab === 'analytics') renderAdminAnalyticsContent();
   else if (tab === 'pyq' || tab === 'formula' || tab === 'books') renderAdminPapersContent(tab);
+  else if (tab === 'videos') renderAdminVideosContent();
   else if (tab === 'hw') renderAdminHwContent();
   else if (tab === 'drive') renderAdminDriveContent();
   setTimeout(function() { renderMath(document.getElementById('admin-body-content')); }, 50);
@@ -5722,6 +5725,7 @@ var SD_ITEMS = [
   ['📚', 'PYQ (Previous Year)', 'pyq', '#6366f1'],
   ['💬', 'Chat with Teacher', 'chat', '#0284c7'],
   [null, 'Study material'],
+  ['📹', 'Class Videos', 'videos', '#dc2626'],
   ['📐', 'Formula Sheets', 'formula', '#a855f7'],
   ['📖', 'Books', 'books', '#d97706'],
   ['📊', 'My Analytics', 'analytics', '#0ea5e9'],
@@ -5976,6 +5980,7 @@ function sdExtraTabHtml(u, uClass) {
   if (studentTab === 'ranker') return studentRankerHtml(u);
   if (studentTab === 'pyq' || studentTab === 'formula' || studentTab === 'books') return renderStudentPapersHtml(studentTab, uClass);
   if (studentTab === 'hw') return renderStudentHwHtml(u);
+  if (studentTab === 'videos') return renderStudentVideosHtml(u);
   if (studentTab === 'analytics') {
     loadClassStats(u);
     var sa = studentAnalytics(u, DB.get(K.S));
@@ -6092,6 +6097,7 @@ function fillStudentMenu() {
   document.getElementById('sd-name').innerHTML = esc(currentUser.fullName || '') + '<div style="font-size:0.74rem; font-weight:700; color:#7c3aed; margin-top:2px;">' + esc(currentUser.studentClass || currentUser.batch || '') + '</div>';
   var u = currentUser, cnt = {};
   cnt.chat = chatUnreadStudent();
+  try { if (pyqCache) cnt.videos = videoNewCount(u); } catch (e) {}
   try { if (hwCache && hwMineCache) cnt.hw = hwPendingCount(u) + newCheckedForStudent().hw.length; } catch (e) {}
   try { cnt.tests = sdAssignedTests(u, u.studentClass || u.batch || 'Class 12').filter(function(t) { var k = studentExamStatus(t).key; return k === 'live' || k === 'open'; }).length; } catch (e) {}
   document.getElementById('sd-menu').innerHTML = SD_ITEMS.map(function(it) {
@@ -6156,7 +6162,7 @@ function renderStudentDashContent() {
   } else if (studentTab === 'about') {
     if (window.FBAPI) FBAPI.watchGallery();
     html += renderInstituteHomeHtml(true);
-  } else if (studentTab === 'profile' || studentTab === 'chat' || studentTab === 'books' || studentTab === 'hw' || studentTab === 'pyq' || studentTab === 'formula' || studentTab === 'analytics' || studentTab === 'tests' || studentTab === 'completed' || studentTab === 'examalert' || studentTab === 'help' || studentTab === 'ranker' || studentTab === 'devices') {
+  } else if (studentTab === 'profile' || studentTab === 'chat' || studentTab === 'books' || studentTab === 'hw' || studentTab === 'pyq' || studentTab === 'formula' || studentTab === 'analytics' || studentTab === 'tests' || studentTab === 'completed' || studentTab === 'examalert' || studentTab === 'help' || studentTab === 'ranker' || studentTab === 'devices' || studentTab === 'videos') {
     html += sdExtraTabHtml(u, uClass);
   } else if (studentTab === 'fees') {
     var payCfg = DB.getPayConfig();
@@ -12547,7 +12553,142 @@ var PAPER_KINDS = {
   formula: { icon: '📐', title: 'Formula Sheets', short: 'Formula Sheet', noun: 'formula sheet', tab: 'formula', ph: 'e.g. Integration formulas', showYear: false },
   books: { icon: '📖', title: 'Books', short: 'Book', noun: 'book', tab: 'books', ph: 'e.g. Class 12 Mathematics Part 1', showYear: false, extra: 'Writer / Publisher', extraPh: 'e.g. S. N. Dey', maxMb: 30, header: true }
 };
-function paperKind(p) { return p.kind === 'formula' ? 'formula' : (p.kind === 'books' ? 'books' : 'pyq'); }
+function paperKind(p) { return p.kind === 'formula' ? 'formula' : (p.kind === 'books' ? 'books' : (p.kind === 'video' ? 'video' : 'pyq')); }
+
+// ================= 📹 CLASS VIDEOS (YouTube "Unlisted") =================
+// The teacher uploads a class recording (or a live class) to YouTube as "Unlisted" and pastes its link here.
+// The database keeps only the link (a few letters); the video plays INSIDE the app, from YouTube.
+// Only students of the chosen class / board see it in the app. (Kept in the "pyq" list with kind:'video'.)
+function ytId(url) {
+  var s = String(url || '').trim();
+  var m = s.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/))([A-Za-z0-9_-]{11})/) || s.match(/^([A-Za-z0-9_-]{11})$/);
+  return m ? m[1] : '';
+}
+function videoList() { return (pyqCache || []).filter(function(p) { return p.kind === 'video'; }).sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); }); }
+function videoIsForMe(v, u) {
+  if (!u) return false;
+  var uClass = u.studentClass || u.batch || '';
+  if (v.cls && v.cls !== 'ALL' && v.cls !== uClass) return false;
+  if (v.board && v.board !== 'ALL' && boardGroup(u.board) !== v.board) return false;
+  return true;
+}
+function videoSeenKey() { return 'acsm_seen_video_' + (currentUser ? currentUser.id : ''); }
+function videoNewCount(u) {
+  var seen = 0;
+  try { seen = Number(localStorage.getItem(videoSeenKey()) || 0); } catch (e) {}
+  return videoList().filter(function(v) { return videoIsForMe(v, u) && Number(v.addedAt || 0) > seen; }).length;
+}
+function videoThumb(v) { return 'https://i.ytimg.com/vi/' + encodeURIComponent(v.ytId) + '/hqdefault.jpg'; }
+// one video card (thumbnail + title); a tap opens the player
+function videoCardHtml(v, admin, isNew) {
+  return '<div class="card" style="display:flex; gap:12px; align-items:center; padding:10px; cursor:pointer;" onclick="openVideo(\'' + escA(v.id) + '\')">' +
+    '<div style="position:relative; flex-shrink:0;"><img src="' + videoThumb(v) + '" alt="" loading="lazy" style="width:128px; height:72px; object-fit:cover; border-radius:8px; background:#000;">' +
+      '<span style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.6rem;">▶️</span></div>' +
+    '<div style="flex:1; min-width:0;"><b>' + esc(v.title) + '</b>' + (isNew ? ' <span class="badge" style="background:#dc2626; color:#fff;">NEW</span>' : '') +
+      '<div style="font-size:0.76rem; color:var(--text-muted); margin-top:2px;">' + (v.chapter ? '📖 ' + esc(v.chapter) + ' • ' : '') + esc(v.cls === 'ALL' ? 'All classes' : v.cls) +
+        (v.board && v.board !== 'ALL' ? ' • 🏫 ' + esc(boardLabel(v.board, v.cls === 'ALL' ? '' : v.cls)) : '') + ' • ' + fmtDateShort(localDateStr(new Date(v.addedAt || 0))) + '</div>' +
+      (v.desc ? '<div style="font-size:0.8rem; color:#cbd5e1; margin-top:2px;">' + esc(String(v.desc).slice(0, 120)) + '</div>' : '') + '</div>' +
+    (admin ? '<button type="button" class="btn btn-red btn-sm" onclick="event.stopPropagation(); deleteVideo(\'' + escA(v.id) + '\')">🗑️</button>' : '') +
+  '</div>';
+}
+// the player: YouTube inside the app (privacy-enhanced mode, no other channels' suggestions at the end)
+function openVideo(id) {
+  var v = videoList().find(function(x) { return x.id === id; });
+  if (!v) return;
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px;"><h3 style="margin:0; font-size:1rem;">📹 ' + esc(v.title) + '</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
+    '<div style="position:relative; width:100%; padding-top:56.25%; background:#000; border-radius:12px; overflow:hidden;">' +
+      '<iframe src="https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v.ytId) + '?rel=0&modestbranding=1&playsinline=1" title="' + escA(v.title) + '" style="position:absolute; inset:0; width:100%; height:100%; border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>' +
+    (v.desc ? '<p style="font-size:0.86rem; margin:10px 0 0 0; white-space:pre-wrap;">' + esc(v.desc) + '</p>' : '') +
+    '<p style="font-size:0.74rem; color:var(--text-muted); margin:8px 0 0 0;">Tip: tap ⛶ in the player for full screen. If the video does not play, check your internet.</p>';
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+}
+// 🎓 the student's Class Videos page: grouped by chapter, newest first
+function renderStudentVideosHtml(u) {
+  var head = '<div class="page-title">📹 Class Videos</div>';
+  if (!pyqCache) { loadPyq(false); return head + '<div class="card"><p style="color:var(--text-muted); margin:0;">Loading…</p></div>'; }
+  var seen = 0;
+  try { seen = Number(localStorage.getItem(videoSeenKey()) || 0); } catch (e) {}
+  var mine = videoList().filter(function(v) { return videoIsForMe(v, u); });
+  try { if (mine.length) localStorage.setItem(videoSeenKey(), String(Math.max.apply(null, mine.map(function(v) { return Number(v.addedAt || 0); })))); } catch (e) {}
+  if (!mine.length) return head + '<div class="card"><p style="color:var(--text-muted); margin:0;">No class videos yet. Your teacher\'s recorded classes will appear here.</p></div>';
+  var groups = {}, order = [];
+  mine.forEach(function(v) { var c = v.chapter || 'Other videos'; if (!groups[c]) { groups[c] = []; order.push(c); } groups[c].push(v); });
+  return head + order.map(function(c) {
+    return '<div class="sd-section-title">📖 ' + esc(c) + ' (' + groups[c].length + ')</div>' + groups[c].map(function(v) { return videoCardHtml(v, false, Number(v.addedAt || 0) > seen); }).join('');
+  }).join('');
+}
+// 👩‍🏫 the teacher's page: add a video (YouTube link) + the list
+var videoClassFilter = 'ALL';
+function renderAdminVideosContent() {
+  if (!pyqCache) loadPyq(false);
+  var parts = studentClasses();
+  var clsOpts = '<option value="ALL">All classes</option>' + parts.map(function(p) { return '<option value="' + escA(p) + '">' + esc(p) + '</option>'; }).join('');
+  var filtOpts = '<option value="ALL">All classes</option>' + parts.map(function(p) { return '<option value="' + escA(p) + '"' + (videoClassFilter === p ? ' selected' : '') + '>' + esc(p) + '</option>'; }).join('');
+  var list = videoList().filter(function(v) { return videoClassFilter === 'ALL' || v.cls === videoClassFilter || v.cls === 'ALL'; });
+  document.getElementById('admin-body-content').innerHTML =
+    '<div class="card card-amber">' +
+      '<h3 style="margin:0 0 4px 0;">📹 Add a class video</h3>' +
+      '<details style="margin:0 0 10px 0; font-size:0.84rem;"><summary style="cursor:pointer; color:#fcd34d; font-weight:700;">❓ How to put a video on YouTube so that only your students can watch it (tap to open)</summary>' +
+        '<ol style="line-height:1.8; margin:6px 0 0 18px; padding:0;">' +
+          '<li>Open <b>YouTube</b> (or the <b>YouTube Studio</b> app) with your new YouTube account → <b>Create / ➕</b> → <b>Upload video</b> → choose the recording.</li>' +
+          '<li>Write the title. For “Audience” choose <b>No, it’s not made for kids</b>.</li>' +
+          '<li>At <b>Visibility</b> choose <b>Unlisted</b> (NOT Public, NOT Private) → <b>Save / Upload</b>.</li>' +
+          '<li>Press <b>Share</b> → <b>Copy link</b>, and paste it in the box below.</li>' +
+          '<li>A <b>live class</b> works too: YouTube → <b>Go live</b> → Visibility <b>Unlisted</b> → copy its link and add it here before the class.</li>' +
+        '</ol>' +
+        '<p style="margin:6px 0 0 0; color:var(--text-muted);"><b>Unlisted</b> = it never shows in YouTube search or on your channel; only people who have the link can watch — and the link is only inside your app. (“Private” videos cannot play inside an app, so do not choose Private.)</p></details>' +
+      '<label class="label">YouTube link *</label><input type="text" id="vid-url" class="input" placeholder="https://youtu.be/…  or  https://www.youtube.com/watch?v=…" oninput="videoPreview()">' +
+      '<div id="vid-prev"></div>' +
+      '<div class="grid-2">' +
+        '<div><label class="label">Title *</label><input type="text" id="vid-title" class="input" placeholder="e.g. Integration — Class 3 (by parts)"></div>' +
+        '<div><label class="label">Chapter / Topic</label><input type="text" id="vid-chapter" class="input" placeholder="e.g. Integration" list="vid-chap-list"></div>' +
+        '<div><label class="label">Class</label><select id="vid-cls" class="select" onchange="var b=document.getElementById(\'vid-board\'); if(b) b.innerHTML=noticeBoardOpts(b.value, this.value);">' + clsOpts + '</select></div>' +
+        '<div><label class="label">Board</label><select id="vid-board" class="select">' + noticeBoardOpts('ALL', 'ALL') + '</select></div>' +
+      '</div>' +
+      '<datalist id="vid-chap-list">' + videoList().map(function(v) { return v.chapter; }).filter(function(c, i, a) { return c && a.indexOf(c) === i; }).map(function(c) { return '<option value="' + escA(c) + '">'; }).join('') + '</datalist>' +
+      '<label class="label">Note for the students (optional)</label><textarea id="vid-desc" class="textarea" rows="2" placeholder="e.g. Watch before Thursday\'s test."></textarea>' +
+      '<button type="button" id="vid-save" class="btn btn-red" onclick="saveVideo()">📹 Add video for the students</button>' +
+    '</div>' +
+    '<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin:6px 0 10px 0;">' +
+      '<h3 style="margin:0;">Videos (' + list.length + ')</h3>' +
+      '<select class="select" style="max-width:200px; margin:0;" onchange="videoClassFilter=this.value; renderAdminVideosContent();">' + filtOpts + '</select>' +
+    '</div>' +
+    (pyqCache ? (list.map(function(v) { return videoCardHtml(v, true, false); }).join('') || '<div class="card"><p style="color:var(--text-muted); margin:0;">No videos yet.</p></div>') : '<div class="card"><p style="color:var(--text-muted); margin:0;">Loading…</p></div>');
+}
+// as soon as a link is pasted: the video's picture shows (so the teacher sees it is the right one)
+function videoPreview() {
+  var id = ytId((document.getElementById('vid-url') || {}).value);
+  var box = document.getElementById('vid-prev');
+  if (!box) return;
+  box.innerHTML = id ? '<div style="display:flex; gap:10px; align-items:center; margin:-4px 0 10px 0;"><img src="https://i.ytimg.com/vi/' + id + '/hqdefault.jpg" alt="" style="width:128px; height:72px; object-fit:cover; border-radius:8px;"><span style="font-size:0.8rem; color:#86efac;">✅ YouTube video found</span></div>'
+    : ((document.getElementById('vid-url') || {}).value ? '<div style="font-size:0.8rem; color:#fca5a5; margin:-4px 0 10px 0;">❌ This is not a YouTube video link.</div>' : '');
+}
+async function saveVideo() {
+  if (!teacherOnly()) return;
+  var id = ytId(document.getElementById('vid-url').value);
+  var title = document.getElementById('vid-title').value.trim();
+  if (!id) { showToast('Paste a YouTube video link (Share → Copy link).', 'error'); return; }
+  if (!title) { showToast('Write a title for the video.', 'error'); return; }
+  var meta = { id: 'vid_' + Date.now(), kind: 'video', ytId: id, title: title, chapter: document.getElementById('vid-chapter').value.trim(),
+    cls: document.getElementById('vid-cls').value, board: document.getElementById('vid-board').value || 'ALL', desc: document.getElementById('vid-desc').value.trim(), addedAt: Date.now() };
+  var btn = document.getElementById('vid-save');
+  if (btn) btn.disabled = true;
+  try {
+    await FBAPI.pyqMetaSave(meta);
+    pyqCache = (pyqCache || []).concat([meta]);
+    showToast('📹 Video added — ' + (meta.cls === 'ALL' ? 'all students' : 'students of ' + meta.cls) + ' can watch it in the app now.', 'success');
+    renderAdminVideosContent();
+  } catch (e) { if (btn) btn.disabled = false; showToast('Could not save: ' + ((e && e.code) || 'check your internet'), 'error'); }
+}
+async function deleteVideo(id) {
+  if (!teacherOnly()) return;
+  if (!confirm('Remove this video from the app? (It stays on YouTube.)')) return;
+  try { await FBAPI.pyqDelete(id); } catch (e) {}
+  pyqCache = (pyqCache || []).filter(function(p) { return p.id !== id; });
+  renderAdminVideosContent();
+  showToast('Video removed from the app.', 'success');
+}
 
 function loadPyq(force) {
   if (pyqLoading || (pyqCache && !force)) return;
@@ -12560,7 +12701,9 @@ function loadPyq(force) {
   }).then(function() {
     pyqLoading = false;
     if (cloud.role === 'admin' && (currentAdminTab === 'pyq' || currentAdminTab === 'formula' || currentAdminTab === 'books')) renderAdminPapersContent(currentAdminTab);
-    if (cloud.role === 'student' && (studentTab === 'pyq' || studentTab === 'formula' || studentTab === 'books')) renderStudentDashContent();
+    if (cloud.role === 'admin' && currentAdminTab === 'videos') renderAdminVideosContent();
+    if (cloud.role === 'student' && (studentTab === 'pyq' || studentTab === 'formula' || studentTab === 'books' || studentTab === 'videos')) renderStudentDashContent();
+    if (cloud.role === 'student' && typeof fillStudentMenu === 'function') fillStudentMenu();
   });
 }
 

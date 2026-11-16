@@ -313,6 +313,15 @@
     #tab-btn-drive     { --acc: #0284c7; --acc-bg: rgba(2,132,199,0.18); }
     #tab-btn-backup    { --acc: #64748b; --acc-bg: rgba(100,116,139,0.2); }
     .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 12px; border-top: 1px solid #1e293b; }
+    /* ⚙️ the Settings folder: closed = hidden, open = the sub-items slide in one below the other */
+    .set-sub { display: none; flex-direction: column; gap: 4px; margin-left: 10px; padding-left: 10px; border-left: 2px solid #475569; }
+    .set-sub.open { display: flex; animation: setIn .22s ease; }
+    .side-foot .set-sub .btn { padding: 8px 10px; font-size: 0.8rem; }
+    .set-group { font-size: 0.68rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #94a3b8; margin: 6px 0 0 2px; }
+    #set-toggle[aria-expanded="true"] { border-color: var(--amber-main, #f59e0b); }
+    #set-toggle[aria-expanded="true"] #set-caret { transform: rotate(90deg); }
+    @keyframes setIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .set-sub.open { animation: none; } }
     .admin-main { min-width: 0; display: flex; flex-direction: column; }
     @media (max-width: 860px) {
       .admin-shell { grid-template-columns: 1fr; }
@@ -1330,13 +1339,20 @@
         <button type="button" onclick="switchAdminTab('analytics')" id="tab-btn-analytics" class="btn btn-slate">📊 Analytics</button>
       </nav>
       <div class="side-foot">
-        <button type="button" onclick="openLogoPicker()" class="btn btn-slate">🖼️ Change Logo</button>
-        <button type="button" onclick="openChangePasswordModal()" class="btn btn-slate">🔑 Change Password</button>
-        <button type="button" onclick="openPinSetup()" class="btn btn-slate">🔢 Lock PIN (4 digits)</button>
-        <button type="button" onclick="openQuickOpenSetting()" class="btn btn-slate">⚙️ Quick open setting</button>
-        <button type="button" onclick="openMissRuleSetting()" class="btn btn-slate">⚙️ Lock &amp; grade setting</button>
-        <button type="button" onclick="openWishSetting()" class="btn btn-slate">🎉 Special-day wishes</button>
-        <button type="button" onclick="askNotifyPermission()" class="btn btn-slate">🔔 Phone notifications</button>
+        <!-- ⚙️ one Settings folder: tap to open / close the sub-items -->
+        <button type="button" id="set-toggle" onclick="toggleSettingsMenu()" class="btn btn-slate" aria-expanded="false">⚙️ Settings <span id="set-caret" style="margin-left:auto; transition:transform .2s;">▸</span></button>
+        <div id="set-sub" class="set-sub">
+          <div class="set-group">🔐 Account &amp; security</div>
+          <button type="button" onclick="openChangePasswordModal()" class="btn btn-slate">🔑 Change Password</button>
+          <button type="button" onclick="openPinSetup()" class="btn btn-slate">🔢 Lock PIN (4 digits)</button>
+          <div class="set-group">🎓 Students</div>
+          <button type="button" onclick="openMissRuleSetting()" class="btn btn-slate">🔒 Lock &amp; grade setting</button>
+          <button type="button" onclick="openQuickOpenSetting()" class="btn btn-slate">⚡ Quick open setting</button>
+          <button type="button" onclick="askNotifyPermission()" class="btn btn-slate">🔔 Phone notifications</button>
+          <div class="set-group">🎨 Look &amp; wishes</div>
+          <button type="button" onclick="openLogoPicker()" class="btn btn-slate">🖼️ Change Logo</button>
+          <button type="button" onclick="openWishSetting()" class="btn btn-slate">🎉 Special-day wishes</button>
+        </div>
         <button type="button" onclick="logoutNow()" class="btn btn-slate" style="color:#f87171;">⎋ Logout</button>
       </div>
     </aside>
@@ -3045,7 +3061,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261116214304';
+var APP_BUILD = '20261116214904';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -14872,6 +14888,17 @@ async function launchActiveExam() {
 }
 
 // ⚙️ teacher setting: students open the portal directly (no "Connecting to cloud database…" screen)
+// ⚙️ the Settings folder in the teacher's menu: open / close (remembered on this device)
+function toggleSettingsMenu(force) {
+  var sub = document.getElementById('set-sub'), btn = document.getElementById('set-toggle');
+  if (!sub || !btn) return;
+  var open = typeof force === 'boolean' ? force : !sub.classList.contains('open');
+  sub.classList.toggle('open', open);
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  try { localStorage.setItem('acsm_set_open', open ? '1' : '0'); } catch (e) {}
+}
+window.addEventListener('load', function() { try { if (localStorage.getItem('acsm_set_open') === '1') toggleSettingsMenu(true); } catch (e) {} });
+
 // 🔐 the teacher's settings: refused for anyone who is not the logged-in teacher (admin)
 function teacherOnly() {
   if (cloud.role === 'admin') return true;

@@ -2984,7 +2984,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261116091006';
+var APP_BUILD = '20261116213718';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -5727,21 +5727,60 @@ function studentPickPhoto() {
   var inp = document.getElementById('stu-photo-file');
   if (inp) { inp.value = ''; inp.click(); }
 }
+// 📷 the photo is made 50 KB or smaller by itself (any photo from the phone works): smaller size / quality step by step
+var STU_PHOTO_MAX_KB = 50;
+function photoKb(dataUrl) { return Math.round(String(dataUrl).split(',')[1].length * 0.75 / 1024); }
+function compressToMaxKb(file, maxKb, done) {
+  var steps = [[420, 0.85], [400, 0.75], [360, 0.7], [320, 0.62], [280, 0.55], [240, 0.5], [200, 0.45]], i = 0;
+  (function next() {
+    if (i >= steps.length) { done(null); return; }
+    var s = steps[i++];
+    compressImage(file, s[0], s[1], function(d) {
+      if (!d) { done(null); return; }
+      if (photoKb(d) <= maxKb) done(d); else next();
+    });
+  })();
+}
+var stuPhotoDraft = '';
 function studentPhotoChosen(e) {
   var f = (e.target.files || [])[0];
+  e.target.value = '';
   if (!f || !currentUser) return;
   if (currentUser.photoByStudent) { showToast('Your photo is already set. Ask your teacher to change it.', 'error'); return; }
-  compressImage(f, 360, 0.82, function(dataUrl) {
-    if (!dataUrl) return;
-    if (!confirm('Use this photo? You can upload your photo only ONE time — later only your teacher can change it.')) return;
-    FBAPI.studentSetPhoto(currentUser.id, dataUrl).then(function() {
-      currentUser.photo = dataUrl;
-      currentUser.photoByStudent = true;
-      showToast('✅ Your photo is saved.', 'success');
-      renderStudentDashContent();
-    }).catch(function(err) {
-      showToast(err && err.code === 'permission-denied' ? 'Your photo can be set only once. Ask your teacher to change it.' : 'Could not save the photo. Check your internet and try again.', 'error');
-    });
+  if (!/^image\//.test(f.type || '') && !/\.(jpe?g|png|webp|heic|heif)$/i.test(f.name || '')) { showToast('Please choose a photo (JPG / PNG).', 'error'); return; }
+  showToast('⏳ Getting your photo ready…', 'success');
+  compressToMaxKb(f, STU_PHOTO_MAX_KB, function(dataUrl) {
+    if (!dataUrl) { showToast('This photo could not be read. Please choose another photo (JPG / PNG).', 'error'); return; }
+    stuPhotoDraft = dataUrl;
+    // a clear preview instead of a small "OK / Cancel" box
+    document.getElementById('row-editor-body').innerHTML =
+      '<div style="text-align:center;">' +
+        '<h3 style="margin:0 0 10px 0;">📷 Is this photo OK?</h3>' +
+        '<img src="' + dataUrl + '" alt="" style="width:170px; height:170px; object-fit:cover; border-radius:50%; border:4px solid #8b5cf6; background:#fff;">' +
+        '<div style="font-size:0.8rem; color:#86efac; margin-top:6px;">Size: ' + photoKb(dataUrl) + ' KB (within ' + STU_PHOTO_MAX_KB + ' KB) ✅</div>' +
+        '<p style="font-size:0.84rem; color:#fcd34d; margin:10px 0;">⚠ You can upload your photo <b>only ONE time</b>. After this only your teacher can change it.</p>' +
+        '<div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">' +
+          '<button type="button" id="stu-photo-save" class="btn btn-green" onclick="studentPhotoSave()">✅ Use this photo</button>' +
+          '<button type="button" class="btn btn-slate" onclick="closeModal()">↩ Choose another</button>' +
+        '</div></div>';
+    document.getElementById('row-editor-modal').classList.remove('hidden');
+  });
+}
+function studentPhotoSave() {
+  var dataUrl = stuPhotoDraft;
+  if (!dataUrl || !currentUser) return;
+  var btn = document.getElementById('stu-photo-save');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Saving…'; }
+  FBAPI.studentSetPhoto(currentUser.id, dataUrl).then(function() {
+    currentUser.photo = dataUrl;
+    currentUser.photoByStudent = true;
+    stuPhotoDraft = '';
+    closeModal();
+    showToast('✅ Your photo is saved.', 'success');
+    renderStudentDashContent();
+  }).catch(function(err) {
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Use this photo'; }
+    showToast(err && err.code === 'permission-denied' ? 'Your photo can be set only once. Ask your teacher to change it.' : 'Could not save the photo. Check your internet and try again.', 'error');
   });
 }
 
@@ -5779,9 +5818,14 @@ function studentProfileHtml(u, uClass, admin) {
     '<div class="card" style="text-align:center;">' + sdAvatarHtml(u, 'sd-avatar sd-avatar-lg') +
       (admin ? (u.photoByStudent ? '<div style="font-size:0.74rem; color:var(--text-muted); margin-top:6px;">Photo uploaded by the student (one time).</div>' : '') : u.photoByStudent
         ? '<div style="font-size:0.74rem; color:var(--text-muted); margin-top:6px;">🔒 Photo set. To change it again, ask your teacher.</div>'
-        : '<div style="margin-top:10px;"><button type="button" class="btn btn-purple btn-sm" onclick="studentPickPhoto()">📷 Upload my photo</button>' +
+        // the whole box IS the photo chooser (the real file input lies over it) — a tap always opens the gallery / camera,
+        // also in the installed app (a script "click" on a hidden input is blocked by many phones)
+        : '<label class="pp-box" style="padding:14px 12px; max-width:320px; margin:10px auto 0;">' +
+            '<input type="file" id="stu-photo-file" accept="image/*" onchange="studentPhotoChosen(event)">' +
+            '<div class="pp-btn">📷 Upload my photo</div>' +
+            '<div class="pp-small" style="margin-top:8px;">Photo size: up to <b>' + STU_PHOTO_MAX_KB + ' KB</b> (a bigger photo is made smaller by itself)</div>' +
             '<div style="font-size:0.74rem; color:#fcd34d; margin-top:4px;">⚠ You can upload your photo <b>only once</b> — choose a clear photo of your face.</div>' +
-            '<input type="file" id="stu-photo-file" accept="image/*" class="hidden" onchange="studentPhotoChosen(event)"></div>') +
+          '</label>') +
       '<h3 style="margin:10px 0 4px 0;">' + esc(u.fullName) + '</h3>' +
       '<div style="font-size:0.8rem; color:var(--text-muted);">' + esc(u.regNo || '') + '</div>' +
       '<div style="margin-top:8px; display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">' + courses.map(function(c) { return '<span class="badge" style="background:#1e293b; color:#fcd34d;">' + esc(c) + '</span>'; }).join('') + '</div>' +
@@ -13242,6 +13286,13 @@ async function reloadHwDetail(selectNew) {
   } catch (e) { showToast('Could not load the submissions: ' + ((e && e.code) || 'error'), 'error'); }
   hwDetail.loading = false;
   if (currentAdminTab === 'hw') renderHwDetail();
+  // 📄 checked copies whose marked pages (E1, E2 …) are not ready for the student yet: made now in the background
+  var t = hwDetail.task, todo = [];
+  Object.keys(hwDetail.fb).forEach(function(p) {
+    var f = hwDetail.fb[p];
+    if (f.status === 'checked' && fbHasBoxes(f) && !f.pgKey && hwDetail.subs[p] && !hwPgQueue.some(function(x) { return x.t.id === t.id && x.phone === p; })) todo.push({ t: t, phone: p, f: f, sub: hwDetail.subs[p] });
+  });
+  if (todo.length) { showToast('📄 Preparing the marked pages of ' + todo.length + ' checked cop' + (todo.length === 1 ? 'y' : 'ies') + ' for the students (in the background)…', 'success'); queueMarkedPages(todo); }
 }
 function closeHwDetail() { hwDetail = null; renderAdminHwContent(); }
 function hwSelect(mode) {
@@ -13639,8 +13690,21 @@ async function fbMarkedPageImgs(fileData, errors) {
   var pages = await fbRenderPages(fileData, nums, 1.25);
   return { total: pages._n || 0, list: nums.filter(function(n) { return pages[n]; }).map(function(n) {
     fbDrawBoxes(pages[n], withPage.filter(function(e) { return e.page === n; }));
-    return { n: n, img: pages[n].toDataURL('image/jpeg', 0.72) };
+    return { n: n, img: fbSmallJpeg(pages[n]) };
   }) };
+}
+// a page picture small enough to be kept for the student (the database takes at most ~1 MB per item)
+function fbSmallJpeg(cv) {
+  var src = cv;
+  if (cv.width > 1240) {                                   // a very big scan: drawn smaller first
+    var s = 1240 / cv.width, c2 = document.createElement('canvas');
+    c2.width = 1240; c2.height = Math.round(cv.height * s);
+    var g2 = c2.getContext('2d'); g2.fillStyle = '#fff'; g2.fillRect(0, 0, c2.width, c2.height); g2.drawImage(cv, 0, 0, c2.width, c2.height);
+    src = c2;
+  }
+  var q = [0.72, 0.6, 0.5, 0.4], d = '';
+  for (var i = 0; i < q.length; i++) { d = src.toDataURL('image/jpeg', q[i]); if (d.length < 900000) break; }
+  return d;
 }
 // one print section per marked page
 function fbPagesSectionsHtml(list, total, errors) {
@@ -13689,13 +13753,15 @@ function queueMarkedPages(items) {
 async function runPgQueue() {
   hwPgBusy = true;
   preloadPdfJs();
-  var done = 0;
+  var done = 0, failed = [];
   while (hwPgQueue.length) {
     var it = hwPgQueue.shift();
-    try { if (await hwStoreMarkedPages(it.t, it.phone, it.f, it.sub)) done++; } catch (e) {}
+    try { if (await hwStoreMarkedPages(it.t, it.phone, it.f, it.sub)) done++; }
+    catch (e) { failed.push(((DB.get(K.U).find(function(u) { return u.id === it.phone; }) || {}).fullName || it.phone) + ' (' + ((e && (e.code || e.message)) || 'error') + ')'); }
   }
   hwPgBusy = false;
-  if (done) showToast('📄 Feedback reports are ready for ' + done + ' student(s) — they can now download them quickly.', 'success');
+  if (done) showToast('📄 Feedback reports are ready for ' + done + ' student(s) — with their marked pages (E1, E2 …).', 'success');
+  if (failed.length) showToast('📄 The marked pages could not be prepared for: ' + failed.join(', ') + '. Open the homework again to retry.', 'error');
 }
 // the print window of a feedback report (opened at once, filled when the pages are ready)
 var FB_PRINT_CSS = '@page{size:A4;margin:12mm} body{font-family:system-ui,"Segoe UI",Roboto,"Noto Sans Bengali",sans-serif;color:#111;font-size:12.5px;margin:0}' +
@@ -13817,17 +13883,25 @@ async function hwFeedbackPdf(phones) {
 // 🎓 the STUDENT downloads their own feedback report (the same report the teacher gets)
 async function studentHwReport(taskId) {
   var t = (hwCache || []).find(function(x) { return x.id === taskId; });
-  var f = hwMineCache && hwMineCache.fb[taskId];
-  if (!t || !f || !currentUser) return;
+  if (!t || !currentUser || !hwMineCache || !hwMineCache.fb[taskId]) return;
   var w = fbOpenPrintWindow();
   if (!w) return;
+  // the newest feedback first (the teacher's portal may have added the marked pages after this app was opened)
+  try {
+    var r = await FBAPI.hwMine(currentUser.id);
+    r.feedback.forEach(function(x) { hwMineCache.fb[x.taskId] = x; });
+    r.subs.forEach(function(x) { hwMineCache.subs[x.taskId] = x; });
+  } catch (e) {}
+  var f = hwMineCache.fb[taskId];
   var stored = !!(f.pgKey && f.pgNums && f.pgNums.length);
-  fbFillPrintWindow(w, t.title + ' — my feedback', hwReportSectionHtml(t, currentUser, currentUser.id, f) +
+  var notYet = !stored && fbHasBoxes(f)
+    ? '<section><p style="color:#92400e; font-weight:700; border:1px dashed #f59e0b; border-radius:8px; padding:10px;">📄 Your answer-sheet pages with the marked mistakes (E1, E2 …) are still being prepared by your teacher\'s portal. Please download this report again a little later to get them too.</p></section>' : '';
+  fbFillPrintWindow(w, t.title + ' — my feedback', hwReportSectionHtml(t, currentUser, currentUser.id, f) + notYet +
     (stored ? '<div class="pg-wait" id="pgw-me">⏳ Your marked answer-sheet pages are being added…</div>' : ''), stored);
   if (!stored) return;
   var sec = null;
   try { sec = await hwStoredPagesHtml(t.id, currentUser.id, f); } catch (e) {}
-  fbFillPending(w, 'pgw-me', sec || '');
+  fbFillPending(w, 'pgw-me', sec || '<section><p style="color:#991b1b;">Your marked pages could not be loaded — check your internet and download again.</p></section>');
 }
 
 // 📄 a first page for every answer sheet in the ZIP: the student's name, ACSM ID and the questions (made as a picture,

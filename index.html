@@ -477,7 +477,8 @@
     .sd-name { margin-top:10px; font-weight:800; font-size:1rem; }
     /* every student menu item has its own colour */
     .sd-item { display:flex; align-items:center; gap:14px; width:calc(100% - 16px); margin:3px 8px; padding:10px 12px; background:#fff; border:0; border-left:4px solid var(--acc, #94a3b8); border-radius:10px; text-align:left; font-size:.95rem; font-weight:600; color:#374151; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.06); }
-    .sd-item:hover, .sd-item:active { background:var(--acc-bg, #eef2f7); }
+    .sd-item:active { background:var(--acc-bg, #eef2f7); }
+    @media (hover: hover) { .sd-item:hover { background:var(--acc-bg, #eef2f7); } }
     .sd-item.current { background:var(--acc); color:#fff; }
     .sd-item.current .sd-ic { background:rgba(255,255,255,.25); }
     .sd-ic { width:34px; height:34px; flex-shrink:0; display:flex; align-items:center; justify-content:center; border-radius:50%; background:var(--acc-bg, #eef2f7); font-size:1.05rem; }
@@ -539,7 +540,10 @@
     .side-nav .btn:hover { transform: translateX(4px) scale(1.02); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }
     .side-nav .btn.btn-red, .side-nav .btn.btn-amber { transform: translateX(8px) scale(1.05); box-shadow: 0 12px 26px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.18), 0 0 18px var(--acc-bg); z-index: 2; }
     .sd-item { transition: transform .18s cubic-bezier(.34,1.56,.64,1), box-shadow .18s, background .15s; position: relative; }
-    .sd-item:hover { transform: translateX(4px) scale(1.02); box-shadow: 0 6px 14px rgba(0,0,0,0.14); }
+    @media (hover: hover) { .sd-item:hover { transform: translateX(4px) scale(1.02); box-shadow: 0 6px 14px rgba(0,0,0,0.14); } }
+    /* 👆 phones: a tap acts at once (no waiting for a double-tap zoom, no sticky hover) */
+    button, a, .btn, .sd-item, .stu-tile, .bottom-nav button, label { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    .sd-drawer { will-change: transform; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
     .sd-item.current { transform: translateX(6px) scale(1.04); box-shadow: 0 10px 22px rgba(0,0,0,0.25); z-index: 1; }
     .stu-tile, .role-card { transition: transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s; }
     @media (prefers-reduced-motion: reduce) { .pop-now { animation: none; } .btn, .sd-item, .qb-chap, .stu-tile { transition: none; } }
@@ -1896,6 +1900,7 @@ function clearPrivateCache() {
   chatMsgs = null; chatSel = '';
   classStatsCache = {}; classStatsAt = 0; classStatsLast = {};
   deviceAll = null; feeUnlocked = false;
+  stuLastHtml = ''; stuLastTab = '';
   dataSeenOnce = {};          // after a logout / login the first data is not "new" again
 }
 
@@ -1932,7 +1937,7 @@ function refreshLiveViews() {
       }
       currentUser = me;
       var dash = document.getElementById('view-student-dash');
-      if (!examState && dash.classList.contains('active')) renderStudentDashContent();
+      if (!examState && dash.classList.contains('active')) renderStudentDashContent(true);
     }
   }, 300);
 }
@@ -3064,7 +3069,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261117000710';
+var APP_BUILD = '20261117211219';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -3939,10 +3944,9 @@ function renderInstituteHomeHtml(readOnly) {
       '<button type="button" onclick="openAboutEditModal()" class="btn btn-amber btn-sm">✏️ Edit Home Page</button>' +
       '<button type="button" onclick="document.getElementById(\'gallery-file-input\').click()" class="btn btn-green btn-sm">➕ Add Photos</button>' +
       '<button type="button" onclick="openSlideSetting()" class="btn btn-purple btn-sm">⏱ Slideshow</button>' +
-      (DB.get(K.GAL).some(function(g) { return g.img && !g.fileId; }) ? '<button type="button" onclick="autoGalleryToDrive(true)" class="btn btn-teal btn-sm">☁️ Move photos to Drive (' + DB.get(K.GAL).filter(function(g) { return g.img && !g.fileId; }).length + ')</button>' : '') +
       '<button type="button" onclick="openLogoPicker()" class="btn btn-slate btn-sm">🖼️ Change Logo</button>' +
       '<button type="button" onclick="resetLogoToDefault()" class="btn btn-slate btn-sm">↩ Default Logo</button>' +
-    '</div>' + galScriptCardHtml();
+    '</div>';     // (the Drive steps card was removed on the teacher's wish — photos still move to the Drive by themselves when it can)
 
   // --- hero slider: all photos (or only the latest 8), newest first; each picture loads only when its turn comes
   var sc = slideCfg();
@@ -4185,7 +4189,7 @@ var galOldScriptWarned = false;
 function galOldScriptMsg() {
   if (galOldScriptWarned) return;
   galOldScriptWarned = true;
-  showToast('☁️ The photos were kept in the portal: your Drive script is the old one. Update it once (☁️ Storage → 📋 Copy script → paste in script.google.com → Deploy → Manage deployments → ✏️ → New version → Deploy), then press “☁️ Move photos to Drive”.', 'error');
+  // (no message any more — the teacher asked for no Drive notes on the About page; the photo is kept small in the portal)
 }
 // ☁️ the photos already in the database → into the Drive (one after another; the database copy is removed after each)
 var galMoving = false;
@@ -4278,7 +4282,7 @@ async function autoGalleryToDrive(manual) {
   else galScriptState = 'old';
   refreshGalCard();
   if (galScriptState === 'ok') moveGalleryToDrive(true);
-  else if (manual) showToast(galScriptState === 'old' ? 'The Drive script is still the old one — do the steps on the card.' : 'The Drive did not answer — check the link in ☁️ Storage (🔌 Test).', 'error');
+  // (no Drive message on the About page)
 }
 function refreshGalCard() { if (cloud.role === 'admin' && currentAdminTab === 'home' && !document.querySelector('#row-editor-modal:not(.hidden)')) renderAdminHomeContent(); }
 // the step-by-step card (teacher's Home page) while the script must be updated
@@ -5827,11 +5831,14 @@ function toggleStudentDrawer(open) {
   b.classList.toggle('hidden', !open);
 }
 function sdGo(k) {
+  // the tapped row lights up at once and the menu slides away smoothly; the page is drawn right after
+  var rows = document.querySelectorAll('#sd-menu .sd-item');
+  for (var i = 0; i < rows.length; i++) rows[i].classList.toggle('current', rows[i].getAttribute('data-k') === k);
   toggleStudentDrawer(false);
   if (k === 'share') return shareApp();
   if (k === 'rate') return rateApp();
   if (k === 'logout') return logoutNow();
-  setStudentTab(k);
+  requestAnimationFrame(function() { setTimeout(function() { setStudentTab(k); }, 16); });
 }
 function shareApp() {
   var link = location.origin + location.pathname;
@@ -6100,12 +6107,15 @@ function fillStudentMenu() {
   try { if (pyqCache) cnt.videos = videoNewCount(u); } catch (e) {}
   try { if (hwCache && hwMineCache) cnt.hw = hwPendingCount(u) + newCheckedForStudent().hw.length; } catch (e) {}
   try { cnt.tests = sdAssignedTests(u, u.studentClass || u.batch || 'Class 12').filter(function(t) { var k = studentExamStatus(t).key; return k === 'live' || k === 'open'; }).length; } catch (e) {}
-  document.getElementById('sd-menu').innerHTML = SD_ITEMS.map(function(it) {
+  var menuHtml = SD_ITEMS.map(function(it) {
     if (!it[0]) return it[1] ? '<div class="sd-group">' + esc(it[1]) + '</div>' : '<div class="sd-sep"></div>';
     var c = it[3] || '#64748b';
     var nUn = cnt[it[2]] || 0;
-    return '<button type="button" class="sd-item' + (it[2] === studentTab ? ' current' : '') + '" style="--acc:' + c + '; --acc-bg:' + c + '22;" onclick="sdGo(\'' + it[2] + '\')"><span class="sd-ic">' + it[0] + '</span><span>' + it[1] + '</span>' + (nUn ? '<span class="badge" style="background:#dc2626; color:#fff; margin-left:auto;">' + nUn + '</span>' : '') + '</button>';
+    return '<button type="button" class="sd-item' + (it[2] === studentTab ? ' current' : '') + '" data-k="' + it[2] + '" style="--acc:' + c + '; --acc-bg:' + c + '22;" onclick="sdGo(\'' + it[2] + '\')"><span class="sd-ic">' + it[0] + '</span><span>' + it[1] + '</span>' + (nUn ? '<span class="badge" style="background:#dc2626; color:#fff; margin-left:auto;">' + nUn + '</span>' : '') + '</button>';
   }).join('');
+  // the menu buttons are only drawn again when something in them really changed (a tap on them is never lost)
+  var menuBox = document.getElementById('sd-menu');
+  if (menuBox._html !== menuHtml) { menuBox.innerHTML = menuHtml; menuBox._html = menuHtml; }
 }
 
 // the tapped button "pops" towards the user (also when the screen is drawn again right after)
@@ -6128,8 +6138,29 @@ function copyUpiId() {
   }
 }
 
-function renderStudentDashContent() {
+// 👆 the student is touching the screen right now (or just did): a background refresh waits, so the tap is never lost
+var tapDownNow = false, lastTapAt = 0, stuLiveWait = null;
+(function() {
+  var down = function() { tapDownNow = true; lastTapAt = Date.now(); };
+  var up = function() { tapDownNow = false; lastTapAt = Date.now(); };
+  document.addEventListener('pointerdown', down, true);
+  document.addEventListener('pointerup', up, true);
+  document.addEventListener('pointercancel', up, true);
+  document.addEventListener('touchstart', down, { capture: true, passive: true });
+  document.addEventListener('touchend', up, { capture: true, passive: true });
+})();
+function userTapping() { return tapDownNow || Date.now() - lastTapAt < 700; }
+var stuLastHtml = '', stuLastTab = '';
+
+// live = true: a refresh because new data arrived (not the student's own tap)
+function renderStudentDashContent(live) {
   if (!currentUser) return showScreen('view-role');
+  if (live === true && (userTapping() || document.getElementById('sd-drawer').classList.contains('open'))) {
+    clearTimeout(stuLiveWait);
+    stuLiveWait = setTimeout(function() { renderStudentDashContent(true); }, 600);
+    return;
+  }
+  clearTimeout(stuLiveWait);
   var u = currentUser;
   var uClass = u.studentClass || u.batch || 'Class 12';
   var notices = sortedNotices().filter(noticeIsForMe);
@@ -6254,8 +6285,12 @@ function renderStudentDashContent() {
       stuHomeTodoHtml(u, allTests);
   }
 
+  var full = '<div class="sd-topbar"><button type="button" class="btn btn-slate btn-sm" onclick="toggleStudentDrawer(true)">☰ Menu</button></div>' + html;
+  // nothing changed on this page: the screen is left as it is (no flicker, no lost tap, no work for the phone)
+  if (live === true && full === stuLastHtml && studentTab === stuLastTab) { fillStudentMenu(); updateStudentNav(unread); return; }
+  stuLastHtml = full; stuLastTab = studentTab;
   var chatDraft = (document.getElementById('chat-input') || {}).value || '';
-  document.getElementById('student-dash-content').innerHTML = '<div class="sd-topbar"><button type="button" class="btn btn-slate btn-sm" onclick="toggleStudentDrawer(true)">☰ Menu</button></div>' + html;
+  document.getElementById('student-dash-content').innerHTML = full;
   if (studentTab === 'chat') { var ci = document.getElementById('chat-input'); if (ci && chatDraft) ci.value = chatDraft; chatScrollEnd(); chatMarkSeenStudent(); }
   fillStudentMenu();
   initHeroSlider();
@@ -7968,7 +8003,7 @@ function loadClassStats(u) {
   }).then(function() {
     classStatsBusy = false;
     classStatsAt = Date.now();
-    if (!examState && (studentTab === 'analytics' || studentTab === 'profile') && document.getElementById('view-student-dash').classList.contains('active')) renderStudentDashContent();
+    if (!examState && (studentTab === 'analytics' || studentTab === 'profile') && document.getElementById('view-student-dash').classList.contains('active')) renderStudentDashContent(true);
   });
 }
 function myStatsIn(u, cs) {
@@ -8325,7 +8360,7 @@ function loadStudentRanks(u, force) {
     .catch(function() { if (!rankStuCache) rankStuCache = []; })
     .then(function() {
       rankStuBusy = false; rankStuAt = Date.now();
-      if (!examState && studentTab === 'ranker' && document.getElementById('view-student-dash').classList.contains('active')) renderStudentDashContent();
+      if (!examState && studentTab === 'ranker' && document.getElementById('view-student-dash').classList.contains('active')) renderStudentDashContent(true);
     });
 }
 function studentRankerHtml(u) {
@@ -12702,7 +12737,7 @@ function loadPyq(force) {
     pyqLoading = false;
     if (cloud.role === 'admin' && (currentAdminTab === 'pyq' || currentAdminTab === 'formula' || currentAdminTab === 'books')) renderAdminPapersContent(currentAdminTab);
     if (cloud.role === 'admin' && currentAdminTab === 'videos') renderAdminVideosContent();
-    if (cloud.role === 'student' && (studentTab === 'pyq' || studentTab === 'formula' || studentTab === 'books' || studentTab === 'videos')) renderStudentDashContent();
+    if (cloud.role === 'student' && (studentTab === 'pyq' || studentTab === 'formula' || studentTab === 'books' || studentTab === 'videos')) renderStudentDashContent(true);
     if (cloud.role === 'student' && typeof fillStudentMenu === 'function') fillStudentMenu();
   });
 }
@@ -13391,7 +13426,7 @@ function loadHw(force) {
   }).then(function() {
     hwLoading = false;
     if (cloud.role === 'admin' && currentAdminTab === 'hw' && !hwDetail) renderAdminHwContent();
-    if (cloud.role === 'student' && (studentTab === 'hw' || studentTab === 'home')) renderStudentDashContent();
+    if (cloud.role === 'student' && (studentTab === 'hw' || studentTab === 'home')) renderStudentDashContent(true);
     if (cloud.role === 'student') { announceChecked(); checkStudentMissLock(); }
   });
 }
@@ -13565,7 +13600,10 @@ async function reloadHwDetail(selectNew) {
   var t = hwDetail.task, todo = [];
   Object.keys(hwDetail.fb).forEach(function(p) {
     var f = hwDetail.fb[p];
-    if (f.status === 'checked' && fbHasBoxes(f) && !f.pgKey && hwDetail.subs[p] && !hwPgQueue.some(function(x) { return x.t.id === t.id && x.phone === p; })) todo.push({ t: t, phone: p, f: f, sub: hwDetail.subs[p] });
+    var sb = hwDetail.subs[p];
+    // (a copy uploaded again AFTER the check is skipped: the boxes belong to the copy that was checked)
+    var need = galleryDrive() ? !f.chkId : (fbHasBoxes(f) && !f.pgKey);
+    if (f.status === 'checked' && need && sb && Number(sb.uploadedAt || 0) <= Number(f.checkedAt || 0) && !hwPgQueue.some(function(x) { return x.t.id === t.id && x.phone === p; })) todo.push({ t: t, phone: p, f: f, sub: sb });
   });
   if (todo.length) { showToast('📄 Preparing the marked pages of ' + todo.length + ' checked cop' + (todo.length === 1 ? 'y' : 'ies') + ' for the students (in the background)…', 'success'); queueMarkedPages(todo); }
 }
@@ -14029,10 +14067,156 @@ async function hwStoredPagesHtml(taskId, phone, f) {
   if (!imgs.some(Boolean)) return null;
   return fbPagesSectionsHtml(f.pgNums.map(function(n, i) { return { n: n, img: imgs[i] }; }), f.pgTotal, f.errors);
 }
+// ✅ THE CHECKED COPY: the student's WHOLE handwritten PDF with every mistake boxed (E1, E2 …) drawn straight on the
+// pages (pdf-lib, no re-drawing of the pages = quick and sharp). It is kept in the teacher's Google Drive
+// (ACSM Portal Files / Public / Checked / <task>) — nothing in the database — and the student reads it from there.
+function fbBytesToDataUrl(bytes) {
+  var s = '', CH = 0x8000;
+  for (var i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return 'data:application/pdf;base64,' + btoa(s);
+}
+async function hwBuildCheckedPdf(fileData, errors) {
+  var L = await loadPdfLib(), doc;
+  if (Array.isArray(fileData)) {                        // a copy sent as photos: one PDF page per photo
+    doc = await L.PDFDocument.create();
+    for (var i = 0; i < fileData.length; i++) {
+      var src = String(fileData[i] || ''); if (!src) continue;
+      var raw = Uint8Array.from(atob(src.split(',')[1] || ''), function(c) { return c.charCodeAt(0); });
+      var im = /^data:image\/png/i.test(src) ? await doc.embedPng(raw) : await doc.embedJpg(raw);
+      var pg = doc.addPage([im.width, im.height]); pg.drawImage(im, { x: 0, y: 0, width: im.width, height: im.height });
+    }
+  } else {
+    var bytes = Uint8Array.from(atob(String(fileData).split(',')[1] || ''), function(c) { return c.charCodeAt(0); });
+    doc = await L.PDFDocument.load(bytes, { ignoreEncryption: true });
+  }
+  var pages = doc.getPages(), font = await doc.embedFont(L.StandardFonts.HelveticaBold);
+  (errors || []).forEach(function(e) {
+    if (!e.page || !Array.isArray(e.box) || e.box.length < 4 || e.page > pages.length) return;
+    var p = pages[e.page - 1], mb = p.getMediaBox(), w = mb.width, h = mb.height;
+    var r = ((p.getRotation().angle % 360) + 360) % 360;
+    var VW = r % 180 ? h : w, VH = r % 180 ? w : h;     // the page as the student sees it
+    // a point on the page as seen (from the top-left) → the PDF's own coordinates
+    var map = function(dx, dy) {
+      if (r === 90) return [mb.x + dy, mb.y + dx];
+      if (r === 180) return [mb.x + w - dx, mb.y + dy];
+      if (r === 270) return [mb.x + w - dy, mb.y + h - dx];
+      return [mb.x + dx, mb.y + h - dy];
+    };
+    var rect = function(dx1, dy1, dx2, dy2) {
+      var a = map(dx1, dy1), b = map(dx2, dy2);
+      return { x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(a[0] - b[0]), height: Math.abs(a[1] - b[1]) };
+    };
+    var slip = e.sev === 'slip' || e.severity === 'slip';
+    var col = slip ? L.rgb(0.85, 0.47, 0.02) : L.rgb(0.86, 0.15, 0.15);
+    var x1 = e.box[1] / 1000 * VW, y1 = e.box[0] / 1000 * VH, x2 = e.box[3] / 1000 * VW, y2 = e.box[2] / 1000 * VH;
+    var lw = Math.max(1.5, VW / 260);
+    p.drawRectangle(Object.assign(rect(x1, y1, x2, y2), { borderColor: col, borderWidth: lw, color: col, opacity: 0.1, borderOpacity: 1 }));
+    // the tag (E1, E2 …) in a coloured label just above the box
+    var tag = String(e.tag || '').slice(0, 6) || '!', fs = Math.max(9, Math.round(VW / 45)), tw = font.widthOfTextAtSize(tag, fs) + fs * 0.8, th = fs * 1.45;
+    var lx = Math.max(0, Math.min(x2 - tw, VW - tw)), ly = Math.max(0, y1 - th);
+    p.drawRectangle(Object.assign(rect(lx, ly, lx + tw, ly + th), { color: col }));
+    var o = map(lx + fs * 0.4, ly + th * 0.75);
+    p.drawText(tag, { x: o[0], y: o[1], size: fs, font: font, color: L.rgb(1, 1, 1), rotate: L.degrees(r) });
+  });
+  return await doc.save({ useObjectStreams: true });
+}
+// made on the teacher's portal right after the feedback is saved (in the background)
+async function hwStoreCheckedCopy(t, phone, f, sub) {
+  var drive = galleryDrive();
+  if (!drive || !sub || f.status !== 'checked') return false;
+  var data = await hwGetSubData(sub);
+  var pdf = await hwBuildCheckedPdf(data, f.errors);
+  var j = await driveUpload(drive, 'public', ['Checked', t.title || t.id], phone + ' ' + t.id + ' checked', fbBytesToDataUrl(pdf));
+  if (!j || !j.id) return false;
+  f.chkId = j.id; f.chkDrive = drive.id; f.chkAt = Date.now(); f.chkOf = Number(sub.uploadedAt || 0);
+  await FBAPI.hwFeedbackSave(f);
+  return true;
+}
+// the student's portal: the checked copy (kept in memory, so opening it again is instant)
+var chkCache = {};
+function chkCopyData(f) {
+  var k = f.chkDrive + '|' + f.chkId;
+  if (chkCache[k]) return chkCache[k];
+  var drive = driveById(f.chkDrive);
+  if (!drive) return Promise.reject(new Error('drive'));
+  chkCache[k] = driveGet(drive, f.chkId, false);
+  chkCache[k].catch(function() { delete chkCache[k]; });
+  return chkCache[k];
+}
+// every page of a PDF as a picture, one after another (onPage gets each one as soon as it is ready)
+async function pdfPagesEach(fileData, scale, onPage) {
+  var lib = await loadScriptOnce('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js', 'pdfjsLib');
+  await loadScriptOnce('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js', 'pdfjsWorker');
+  lib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  var bytes = Uint8Array.from(atob(String(fileData).split(',')[1] || ''), function(ch) { return ch.charCodeAt(0); });
+  var pdf = await lib.getDocument({ data: bytes }).promise;
+  for (var n = 1; n <= pdf.numPages; n++) {
+    var page = await pdf.getPage(n), vp = page.getViewport({ scale: scale }), cv = document.createElement('canvas');
+    cv.width = vp.width; cv.height = vp.height;
+    var g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+    await page.render({ canvasContext: g, viewport: vp }).promise;
+    onPage(n, pdf.numPages, cv.toDataURL('image/jpeg', 0.82));
+  }
+  return pdf.numPages;
+}
+// 👁 the student opens the checked copy right inside the feedback
+async function stuOpenCheckedCopy(taskId) {
+  var f = hwMineCache && hwMineCache.fb[taskId], box = document.getElementById('chk-' + taskId);
+  if (!f || !f.chkId || !box) return;
+  if (box.getAttribute('data-open') === '1') { box.innerHTML = ''; box.setAttribute('data-open', ''); return; }
+  box.setAttribute('data-open', '1');
+  box.innerHTML = '<div class="chk-st" style="color:#fde68a; font-size:0.86rem; margin:8px 0;">⏳ Opening your checked copy…</div>';
+  preloadPdfJs();
+  try {
+    var data = await chkCopyData(f);
+    await pdfPagesEach(data, 1.3, function(n, total, img) {
+      if (box.getAttribute('data-open') !== '1') return;
+      var st = box.querySelector('.chk-st'); if (st) st.textContent = n < total ? '⏳ Page ' + n + ' of ' + total + '…' : '📄 ' + total + ' page(s) — the red / orange boxes are your mistakes (E1, E2 …), explained above.';
+      var d = document.createElement('div');
+      d.innerHTML = '<div style="font-size:0.76rem; font-weight:800; color:#93c5fd; margin:8px 0 3px;">Page ' + n + ' of ' + total + '</div><img src="' + img + '" alt="" style="width:100%; border-radius:8px; background:#fff; display:block;">';
+      box.appendChild(d);
+    });
+  } catch (e) {
+    box.innerHTML = '<div style="color:#fca5a5; font-size:0.86rem; margin:8px 0;">Your checked copy could not be opened — check the internet and try again.</div>';
+    box.setAttribute('data-open', '');
+  }
+}
+// ⬇ the checked copy itself as a PDF file (quick: it is only fetched, nothing is drawn)
+async function stuDownloadCheckedCopy(taskId) {
+  var t = (hwCache || []).find(function(x) { return x.id === taskId; }) || { title: 'homework' };
+  var f = hwMineCache && hwMineCache.fb[taskId];
+  if (!f || !f.chkId) return;
+  showToast('⬇ Downloading your checked copy…', 'success');
+  try {
+    var data = await chkCopyData(f);
+    var bin = atob(data.split(',')[1]), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    var url = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
+    var a = document.createElement('a');
+    a.href = url; a.download = String(t.title || 'homework').replace(/[\\\/:*?"<>|]+/g, ' ').trim() + ' - my checked copy.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+  } catch (e) { showToast('Could not download — check the internet and try again.', 'error'); }
+}
+// the student's checked-copy buttons under the feedback
+function stuCheckedCopyHtml(t, f, s) {
+  if (!f || !f.chkId) return fbHasBoxes(f) && !f.pgKey ? '<div style="font-size:0.78rem; color:var(--text-muted); margin-top:6px;">📄 Your checked copy (with the mistakes boxed) is being prepared by your teacher\'s portal — it will appear here soon.</div>' : '';
+  var older = s && Number(s.uploadedAt || 0) > Number(f.chkOf || f.checkedAt || 0);
+  // ⚡ a newly checked copy is fetched in the background already, so "See" / "Download" open almost at once
+  if (typeof hwNewFbIds !== 'undefined' && hwNewFbIds[t.id]) setTimeout(function() { preloadPdfJs(); chkCopyData(f).catch(function() {}); }, 1500);
+  return '<div style="margin-top:8px; padding:10px 12px; border-radius:10px; background:rgba(59,130,246,0.10); border:1px solid #3b82f6;">' +
+    '<b>📄 Your checked copy</b>' + (older ? ' <span style="font-size:0.76rem; color:#fde68a;">(the copy checked on ' + esc(fmtDateTime(f.checkedAt)) + ')</span>' : '') +
+    '<div style="font-size:0.8rem; color:var(--text-muted); margin:2px 0 8px;">Your own handwritten pages — every mistake has a red / orange box with its number (E1, E2 …).</div>' +
+    '<div style="display:flex; gap:6px; flex-wrap:wrap;"><button type="button" class="btn btn-teal btn-sm" onclick="stuOpenCheckedCopy(\'' + escA(t.id) + '\')">👁 See my checked copy</button>' +
+    '<button type="button" class="btn btn-slate btn-sm" onclick="stuDownloadCheckedCopy(\'' + escA(t.id) + '\')">⬇ Copy only (PDF)</button></div>' +
+    '<div id="chk-' + escA(t.id) + '"></div></div>';
+}
+
 // 🧵 after feedback is saved: the marked pages are made in the background, one student after another
 var hwPgQueue = [], hwPgBusy = false;
 function queueMarkedPages(items) {
-  items.forEach(function(it) { if (fbHasBoxes(it.f) && it.sub) hwPgQueue.push(it); });
+  var drv = !!galleryDrive();
+  items.forEach(function(it) { if (it.sub && it.f && it.f.status === 'checked' && (drv || fbHasBoxes(it.f))) hwPgQueue.push(it); });
   if (hwPgQueue.length && !hwPgBusy) runPgQueue();
 }
 async function runPgQueue() {
@@ -14041,11 +14225,17 @@ async function runPgQueue() {
   var done = 0, failed = [];
   while (hwPgQueue.length) {
     var it = hwPgQueue.shift();
-    try { if (await hwStoreMarkedPages(it.t, it.phone, it.f, it.sub)) done++; }
+    try {
+      var ok = false;
+      if (galleryDrive()) { try { ok = await hwStoreCheckedCopy(it.t, it.phone, it.f, it.sub); } catch (e1) { ok = false; } }
+      // no Drive (or the Drive did not answer): only the marked pages, kept small in the portal (as before)
+      if (!ok && fbHasBoxes(it.f) && !it.f.pgKey) ok = await hwStoreMarkedPages(it.t, it.phone, it.f, it.sub);
+      if (ok) done++;
+    }
     catch (e) { failed.push(((DB.get(K.U).find(function(u) { return u.id === it.phone; }) || {}).fullName || it.phone) + ' (' + ((e && (e.code || e.message)) || 'error') + ')'); }
   }
   hwPgBusy = false;
-  if (done) showToast('📄 Feedback reports are ready for ' + done + ' student(s) — with their marked pages (E1, E2 …).', 'success');
+  if (done) showToast('📄 Checked copies are ready for ' + done + ' student(s) — their own pages with the mistakes boxed (E1, E2 …).', 'success');
   if (failed.length) showToast('📄 The marked pages could not be prepared for: ' + failed.join(', ') + '. Open the homework again to retry.', 'error');
 }
 // the print window of a feedback report (opened at once, filled when the pages are ready)
@@ -14178,6 +14368,21 @@ async function studentHwReport(taskId) {
     r.subs.forEach(function(x) { hwMineCache.subs[x.taskId] = x; });
   } catch (e) {}
   var f = hwMineCache.fb[taskId];
+  if (f.chkId) {
+    // ✅ the feedback at once, then EVERY page of the checked copy (the mistakes boxed) — page by page
+    preloadPdfJs();
+    fbFillPrintWindow(w, t.title + ' — my feedback', hwReportSectionHtml(t, currentUser, currentUser.id, f) +
+      '<div class="pg-wait" id="pgw-me">⏳ Your checked copy (all pages, mistakes boxed) is being added…</div>', true);
+    var secs = '';
+    try {
+      await pdfPagesEach(await chkCopyData(f), 1.25, function(n, total, img) {
+        secs += '<section class="pg"><div class="pgt">Your checked copy — page ' + n + ' of ' + total + '</div><img src="' + img + '" alt=""></section>';
+        try { var nt = w.document.getElementById('pgw-me'); if (nt) nt.textContent = '⏳ Adding your checked copy — page ' + n + ' of ' + total + '…'; } catch (e) {}
+      });
+    } catch (e) { secs = '<section><p style="color:#991b1b;">Your checked copy could not be loaded — check the internet and download again.</p></section>'; }
+    fbFillPending(w, 'pgw-me', secs);
+    return;
+  }
   var stored = !!(f.pgKey && f.pgNums && f.pgNums.length);
   var notYet = !stored && fbHasBoxes(f)
     ? '<section><p style="color:#92400e; font-weight:700; border:1px dashed #f59e0b; border-radius:8px; padding:10px;">📄 Your answer-sheet pages with the marked mistakes (E1, E2 …) are still being prepared by your teacher\'s portal. Please download this report again a little later to get them too.</p></section>' : '';
@@ -14491,7 +14696,8 @@ function renderStudentHwHtml(u) {
       status = (hwNewFbIds[t.id] ? '<div class="fb-new blink-live">🆕 Your teacher has checked this — read the feedback below</div>' : '') +
         hwFeedbackHtml(f, t) +
         // 📄 the same report the teacher gets: feedback + the student's own pages with the mistakes marked
-        '<button type="button" class="btn btn-blue btn-sm" style="margin-top:8px;" onclick="studentHwReport(\'' + escA(t.id) + '\')">📄 Download feedback PDF' + (f.pgKey ? ' (with your marked pages)' : '') + '</button>' +
+        stuCheckedCopyHtml(t, f, s) +
+        '<button type="button" class="btn btn-blue btn-sm" style="margin-top:8px;" onclick="studentHwReport(\'' + escA(t.id) + '\')">📄 Download full report (feedback' + (f.chkId || f.pgKey ? ' + your checked copy' : '') + ')</button>' +
       (redoAsk && !redone ? '<div class="blink-live" style="margin-top:8px; background:rgba(234,179,8,0.12); border:1px solid #ca8a04; border-radius:10px; padding:10px 12px; color:#fde68a;"><b>🔁 Correct your mistakes and submit again.</b><div style="font-size:0.84rem; margin:2px 0 8px 0;">Use the hints above, redo those questions, then upload the corrected work.</div><button type="button" class="btn btn-purple btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Upload corrected work</button></div>' : '') +
       (redone ? '<div style="margin-top:8px; color:#86efac; font-size:0.86rem;">📤 Corrected work uploaded on ' + fmtDateTime(s.uploadedAt) + ' — waiting for your teacher to check it again.</div>' : '');
     } else if (f && f.status === 'missing') {

@@ -3069,7 +3069,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261117211219';
+var APP_BUILD = '20261117220117';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -4723,23 +4723,62 @@ function keyNorm(s) {
     .replace(/[−–]/g, '-').replace(/[.,;:]+$/, '');
 }
 function solutionFinal(exp) {
-  var t = plainText(exp || '').replace(/\[[^\]]*\]\s*$/, '').replace(/\([^)]*(19|20)\d\d[^)]*\)\s*$/, '').trim();
+  // a source tag at the end ("[WBBSE 2019]", "(CBSE 2020)") is left out — but NOT a display formula \[ … \]
+  var t = plainText(exp || '').replace(/(^|[^\\])\[[^\]\\]*\]\s*$/, '$1').replace(/\([^)\\]*(19|20)\d\d[^)\\]*\)\s*$/, '').trim();
+  // a closing note "(Also, … = 1.)" / "(Note: …)" after the answer is left out too
+  t = t.replace(/\(\s*(?:also|note|n\.?b\.?|check|remember|alternatively)\b[^()]*(?:\([^()]*\)[^()]*)*\)\s*\.?\s*$/i, '').trim();
   var m = t.split(/=|⇒|\\Rightarrow|\\implies|→|\\therefore|∴|answer\s*(?:is|:)|ans\s*[:.]/i);
   if (m.length < 2) return '';
   var last = m[m.length - 1].replace(/\\\)|\\\]|\$/g, '').trim();
+  // "… = 1.)" / "… = 40 cm." / "… = 13/3 (Ans)" → the value only
+  last = last.split(/\n/)[0].replace(/\((?:ans|answer)[^)]*\)\s*$/i, '').replace(/[\s.,;:]+$/, '');
+  for (var g = 0; g < 3 && (last.match(/\)/g) || []).length > (last.match(/\(/g) || []).length; g++) last = last.replace(/\)\s*[.,;:]*\s*$/, '');
+  last = last.replace(/[\s.,;:]+$/, '').trim();
   return last.length && last.length <= 40 ? last : '';
 }
-function keyCheck(q) {
+// 🔢 the NUMBER a maths answer stands for ("\frac{12}{37}", "2\sqrt3", "-1", "13/3", "0.75", "\frac{\sqrt3}{2}" …),
+// or null when it is not a plain number (letters, words, several values …)
+function keyNum(s) {
+  var t = plainText(String(s == null ? '' : s));
+  t = t.replace(/\\\(|\\\)|\\\[|\\\]|\$/g, '').replace(/\\left|\\right|\\displaystyle|\\,|\\;|\\!|\\quad/g, '')
+    .replace(/\\[dt]frac/g, '\\frac').replace(/\\text\{\s*(?:cm|m|km|units?|sq\.?\s*units?|cm\^?2|m\^?2|°|degrees?)\s*\}/gi, '')
+    .replace(/[−–—]/g, '-').replace(/×|\\times|\\cdot|·/g, '*').replace(/÷|\\div/g, '/')
+    .replace(/\^\{?\\circ\}?|°|\\degree/g, '').replace(/\b(?:sq\.?\s*)?(?:cm|mm|km|m|units?|degrees?|rad)\b\.?\s*(?:\^?\s*[23]|²|³)?\s*$/i, '')
+    .replace(/²/g, '^2').replace(/³/g, '^3').replace(/π|\\pi/g, 'P').replace(/√/g, '\\sqrt').replace(/\s+/g, '');
+  if (!t || t.length > 60) return null;
+  var guard = 0;
+  // \frac{a}{b} → ((a)/(b))  ;  \sqrt[n]{a} → R(a,n)  ;  \sqrt{a} / \sqrt3 → S(a)
+  while (/\\(frac|sqrt)/.test(t) && guard++ < 20) {
+    var before = t;
+    t = t.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '(($1)/($2))').replace(/\\frac(\d)(\d)/g, '(($1)/($2))')
+      .replace(/\\sqrt\[([^\]]+)\]\{([^{}]*)\}/g, '(($2)^(1/($1)))').replace(/\\sqrt\{([^{}]*)\}/g, 'S($1)').replace(/\\sqrt(\d+(?:\.\d+)?|P)/g, 'S($1)');
+    if (t === before) break;
+  }
+  t = t.replace(/\^\{([^{}]*)\}/g, '^($1)').replace(/[{}]/g, '');
+  if (/[^0-9.+\-*/()^PS]/.test(t)) return null;              // letters, words, a list "2, 3" → not one plain number
+  // 2S(3) → 2*S(3) ; )( → )*( ; 2( → 2*( ; 2P → 2*P
+  t = t.replace(/(\d|\))(?=[(PS])/g, '$1*').replace(/P(?=[\d(PS])/g, 'P*').replace(/\^/g, '**');
+  try {
+    var v = Function('S', 'P', '"use strict"; return (' + t + ');')(Math.sqrt, Math.PI);
+    return typeof v === 'number' && isFinite(v) ? v : null;
+  } catch (e) { return null; }
+}
+function keySameNum(a, b) { return a !== null && b !== null && Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(a), Math.abs(b)); }
+// which option the solution's last value points to: { k, val } when it is a DIFFERENT option than the marked one
+function keyPoint(q) {
   if (!q || !Array.isArray(q.options) || q.options.length < 2 || !q.explanation) return null;
-  var fin = keyNorm(solutionFinal(q.explanation));
+  var raw = solutionFinal(q.explanation), fin = keyNorm(raw);
   if (!fin) return null;
-  var hits = [];
+  var fNum = keyNum(raw), hits = [];
   q.options.forEach(function(o, k) {
-    var a = keyNorm(o), rhs = keyNorm(String(o).split('=').pop());
-    if (a === fin || rhs === fin) hits.push(k);
+    var a = keyNorm(o), rhsRaw = String(o).split('=').pop(), rhs = keyNorm(rhsRaw);
+    if (a === fin || rhs === fin || (fNum !== null && (keySameNum(fNum, keyNum(o)) || keySameNum(fNum, keyNum(rhsRaw))))) hits.push(k);
   });
-  if (hits.length !== 1 || hits[0] === Number(q.correct || 0)) return null;
-  return { k: hits[0], val: solutionFinal(q.explanation) };
+  return hits.length === 1 ? { k: hits[0], val: raw } : null;
+}
+function keyCheck(q) {
+  var p = keyPoint(q);
+  return p && p.k !== Number(q.correct || 0) ? p : null;
 }
 function keyWarnHtml(q, fixCall) {
   var c = keyCheck(q);
@@ -4748,11 +4787,71 @@ function keyWarnHtml(q, fixCall) {
     '⚠️ The solution ends with <b>' + mx(c.val) + '</b> = option <b>' + String.fromCharCode(65 + c.k) + '</b>, but the marked answer is <b>' + String.fromCharCode(65 + Number(q.correct || 0)) + '</b>. The answer key may be wrong. ' +
     '<button type="button" class="btn btn-amber btn-xs" onclick="' + fixCall + '">✔ Make ' + String.fromCharCode(65 + c.k) + ' correct</button></div>';
 }
+// 🔍 ONE PRESS: every question of the Question Bank AND of every exam is checked — where the solution's own answer is a
+// different option than the marked one, the teacher sees the list, and "Fix" corrects the key everywhere and
+// re-marks every student who already wrote that exam (their marks, rank and the "Correct answer" they see)
+var keyFixList = [];
+function keyFixScan() {
+  var list = [];
+  DB.get(K.T).forEach(function(t) {
+    (t.questions || []).forEach(function(q, i) {
+      var c = keyCheck(q);
+      if (!c) return;
+      var n = DB.get(K.S).filter(function(s) { return s.testId === t.id && (s.evaluations || []).some(function(e) { return e.qid === q.id; }); }).length;
+      list.push({ src: 't', tid: t.id, i: i, q: q, k: c.k, val: c.val, where: '📝 ' + (t.title || 'Exam') + ' — Q' + (i + 1), n: n });
+    });
+  });
+  var inT = {};
+  list.forEach(function(x) { inT[x.q.id] = 1; });
+  DB.get(K.QB).forEach(function(q) {
+    var c = keyCheck(q);
+    if (!c || inT[q.id]) return;              // (a question that is also in an exam is fixed there — the bank follows)
+    list.push({ src: 'qb', id: q.id, q: q, k: c.k, val: c.val, where: '📚 ' + (q.partition || '') + ' — ' + chapterOf(q), n: 0 });
+  });
+  return list;
+}
+function openKeyFixAll() {
+  keyFixList = keyFixScan();
+  var L = function(k) { return String.fromCharCode(65 + Number(k || 0)); };
+  var rows = keyFixList.map(function(x, j) {
+    var q = x.q, cur = Number(q.correct || 0);
+    return '<label style="display:block; border:1px solid #334155; border-radius:10px; padding:8px 10px; margin-bottom:8px; cursor:pointer;">' +
+      '<div style="display:flex; gap:8px; align-items:flex-start;"><input type="checkbox" class="kf-chk" data-j="' + j + '" checked style="margin-top:4px; width:18px; height:18px;">' +
+      '<div style="flex:1; min-width:0;"><div style="font-size:0.74rem; color:#93c5fd; font-weight:700;">' + esc(x.where) + (x.n ? ' • <span style="color:#fcd34d;">' + x.n + ' student(s) will be re-marked</span>' : '') + '</div>' +
+      '<div style="color:#fff; margin:3px 0;">' + mx(testQText(q)) + '</div>' +
+      '<div style="font-size:0.84rem;">Marked now: <b style="color:#fca5a5;">' + L(cur) + ') ' + mx(q.options[cur]) + '</b> → solution says: <b style="color:#6ee7b7;">' + L(x.k) + ') ' + mx(q.options[x.k]) + '</b></div>' +
+      '<div style="font-size:0.76rem; color:var(--text-muted);">Solution ends with: ' + mx(x.val) + '</div></div></div></label>';
+  }).join('');
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h3 style="margin:0;">🔍 Answer-key check</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
+    (keyFixList.length
+      ? '<p style="margin:0 0 10px 0; font-size:0.84rem; color:var(--text-muted);">Checked <b>every</b> question of the Question Bank and of all exams. In these <b style="color:#fcd34d;">' + keyFixList.length + '</b> the worked solution gives a <b>different option</b> than the marked answer. Untick any you want to keep, then press <b>Fix</b> — the exams, the Question Bank and the students\' marks are corrected together.</p>' +
+        '<div style="max-height:58vh; overflow:auto; padding-right:4px;">' + rows + '</div>' +
+        '<div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;"><button type="button" class="btn btn-amber" onclick="keyFixGo()">✔ Fix the ticked &amp; re-mark students</button></div>'
+      : '<p style="margin:0; color:#6ee7b7; font-weight:700;">✅ All answer keys match their solutions — nothing to fix.</p><p style="font-size:0.8rem; color:var(--text-muted);">(Questions without a worked solution, or whose answer is words / a proof, cannot be checked this way.)</p>');
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+  renderMath(document.getElementById('row-editor-body'));
+}
+function keyFixGo() {
+  var pick = [];
+  document.querySelectorAll('.kf-chk').forEach(function(c) { if (c.checked) pick.push(keyFixList[Number(c.getAttribute('data-j'))]); });
+  if (!pick.length) { showToast('Nothing ticked.', 'error'); return; }
+  var fixed = 0, remarked = 0, qb = DB.get(K.QB), qbTouched = false;
+  pick.forEach(function(x) {
+    if (x.src === 't') { remarked += fixTestAnswerGo(x.tid, x.i, x.k, true) || 0; fixed++; }
+    else { var q = qb.find(function(y) { return y.id === x.id; }); if (q) { q.correct = x.k; if (q.options[x.k] !== undefined) q.answerText = q.options[x.k]; qbTouched = true; fixed++; } }
+  });
+  if (qbTouched) DB.set(K.QB, DB.get(K.QB).map(function(q) { var y = qb.find(function(z) { return z.id === q.id; }); return y && pick.some(function(p) { return p.src === 'qb' && p.id === q.id; }) ? y : q; }));
+  closeModal();
+  if (currentAdminTab === 'qbank') renderAdminQBankContent();
+  showToast('✔ ' + fixed + ' answer key(s) corrected.' + (remarked ? ' 🔁 ' + remarked + ' student result(s) re-marked — they see the new marks now.' : ''), 'success');
+}
 // Question Bank: set the right option of a question
 function setQCorrect(qid, k) {
   var qb = DB.get(K.QB), q = qb.find(function(x) { return x.id === qid; });
   if (!q) return;
   q.correct = k;
+  if (q.options && q.options[k] !== undefined) q.answerText = q.options[k];
   DB.set(K.QB, qb);
   renderAdminQBankContent();
   var inExams = DB.get(K.T).filter(function(t) { return (t.questions || []).some(function(x) { return x.id === qid; }); });
@@ -4780,6 +4879,7 @@ function fixTestAnswerGo(tid, i, k, quiet) {
   if (!q || !q.options || q.options[k] === undefined) return 0;
   var oldOpts = q.options.map(String);
   q.correct = k;
+  q.answerText = q.options[k];        // the written answer follows the new key too
   DB.set(K.T, tests);
   syncQuestionToBank(q);
   var changed = regradeTestQuestion(tid, q, oldOpts);
@@ -10093,7 +10193,8 @@ function buildAIPromptString() {
     'RULES\n' +
     '1. Output ONLY the raw JSON array. No markdown fences (no ```), no words before or after it.\n' +
     '2. Every question must work BOTH as an MCQ and as a descriptive (subjective) question, so give ALL of these fields:\n' +
-    '   - "options": exactly 4 options, and "correct": the index (0, 1, 2 or 3) of the right option. If the source question is not an MCQ, write 3 believable wrong options yourself.\n' +
+    '   - "options": exactly 4 options, and "correct": the index (0, 1, 2 or 3) of the right option (0 = A, 1 = B, 2 = C, 3 = D). If the source question is not an MCQ, write 3 believable wrong options yourself.\n' +
+    '   - ANSWER KEY CHECK (very important): solve every question yourself FIRST. "correct" MUST be the index of the option that is EQUAL to the final answer of your own solution, and "answerText" must be that same option. If you shuffle the options, count the index again afterwards (A = 0). The last line of the "explanation" must end with "= <the value of that option>". Never give a key that disagrees with the solution.\n' +
     '   - "answerText": the short final answer.\n' +
     '   - "explanation": the complete step-by-step solution.\n' +
     (inputQState.chapter
@@ -10235,6 +10336,24 @@ function normalizeQuestionItem(rawItem, index) {
   expl = fixMath(expl);
   if (opts.length < 2) issues.push('no options — usable only as a subjective question');
   if (!expl) issues.push('no step-by-step solution');
+  // ✅ the answer key is checked against the worked solution (and the written answer) at once: an AI often gets
+  // the option LETTER wrong while its solution is right → the option the solution really gives is used
+  if (opts.length >= 2) {
+    var L = function(k) { return String.fromCharCode(65 + k); };
+    var kp = keyPoint({ options: opts, explanation: expl, correct: corr });
+    var byAns = null;
+    if (ans) {
+      var an = keyNum(ans), ak = keyNorm(ans), hitA = [];
+      opts.forEach(function(o, k) { if (keyNorm(o) === ak || (an !== null && keySameNum(an, keyNum(o)))) hitA.push(k); });
+      if (hitA.length === 1) byAns = hitA[0];
+    }
+    var want = kp ? kp.k : byAns;
+    if (want !== null && want !== undefined && want !== corr) {
+      issues.push('answer key corrected: ' + L(corr) + ' → ' + L(want) + (kp ? ' (the solution gives ' + plainText(kp.val).slice(0, 30) + ')' : ' (the given answer is ' + plainText(ans).slice(0, 30) + ')'));
+      corr = want;
+    }
+    ans = opts[corr];
+  }
   var part = inputQState.targetClass || 'Class 12';
   return {
     id: 'q_' + Date.now() + '_' + index + '_' + Math.floor(Math.random() * 1000),
@@ -11381,7 +11500,9 @@ function renderAdminQBankContent() {
       '<button type="button" class="btn btn-slate btn-sm" style="margin-left:auto;" onclick="qbKeyOnly=false; qbLimit=60; renderAdminQBankContent()">✕ Show all questions</button></div>';
   } else {
     var nKeyAll = inClass.filter(function(q) { return (qbChapter === 'ALL' || chapterOf(q) === qbChapter) && keyCheck(q); }).length;
-    if (nKeyAll) chapterBar += '<div style="margin:0 0 10px 0;"><button type="button" class="btn btn-amber btn-sm blink-live" onclick="qbKeyOnly=true; qbLimit=500; renderAdminQBankContent()">⚠️ ' + nKeyAll + ' question(s): the answer key may be wrong — check them</button></div>';
+    chapterBar += '<div style="margin:0 0 10px 0; display:flex; gap:6px; flex-wrap:wrap;">' +
+      (nKeyAll ? '<button type="button" class="btn btn-amber btn-sm blink-live" onclick="qbKeyOnly=true; qbLimit=500; renderAdminQBankContent()">⚠️ ' + nKeyAll + ' question(s): the answer key may be wrong — check them</button>' : '') +
+      '<button type="button" class="btn btn-teal btn-sm" onclick="openKeyFixAll()">🔍 Check all answer keys (bank + exams) &amp; fix</button></div>';
   }
   var qbFind = function(s) { return String(s || '').toLowerCase().replace(/[{}\\$()\[\]\s_^]/g, ''); };
   var sFind = qbSearchQuery ? qbFind(qbSearchQuery) : '';
@@ -12141,6 +12262,7 @@ function renderAdminTestsContent() {
         '<button type="button" onclick="openExamBuilderModal(\'' + escA(t.id) + '\')" class="btn btn-amber btn-sm">✏️ Edit</button>' +
         '<button type="button" onclick="openTestQuestions(\'' + escA(t.id) + '\')" class="btn btn-purple btn-sm">👁️ Questions (' + (t.questions || []).length + ')</button>' +
         '<button type="button" onclick="testQuestionsPdf(\'' + escA(t.id) + '\', false)" class="btn btn-slate btn-sm">📄 PDF</button>' +
+        (function() { var bad = (t.questions || []).filter(function(q) { return keyCheck(q); }).length; return bad ? '<button type="button" onclick="openKeyFixAll()" class="btn btn-amber btn-sm blink-live">⚠️ ' + bad + ' answer key(s) wrong? Fix</button>' : ''; })() +
         '<button type="button" onclick="resultsTestFilter=\'' + escA(t.id) + '\'; switchAdminTab(\'results\')" class="btn btn-teal btn-sm">📊 Results</button>' +
         '<button type="button" onclick="deleteTest(\'' + escA(t.id) + '\')" class="btn btn-red btn-sm">🗑️ Delete</button>' +
       '</div></div>';

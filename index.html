@@ -3411,7 +3411,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118232445';
+var APP_BUILD = '20261118232811';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -12503,19 +12503,22 @@ function renderExamBuilderModalBody() {
   var sems = semestersFor(st.targetClass);
   if (st.tBoard !== 'WB' || !sems.length || (st.tSem !== 'ALL' && sems.indexOf(st.tSem) === -1)) st.tSem = 'ALL';
   var takers = clsStus.filter(function(u) {
-    if (st.tBoard !== 'ALL' && boardGroup(u.board) !== st.tBoard) return false;
+    if (!boardInTarget(st.tBoard, u)) return false;
     if (st.tSem !== 'ALL' && (u.semester || '') !== st.tSem) return false;
     return true;
   });
+  // 🏫 one board, several boards (same paper for ICSE + CBSE …) or all — tick the boxes
+  var picked = st.tBoard === 'ALL' ? [] : String(st.tBoard).split(',');
   var whoTakes =
-    '<div><label class="label">👥 Which students take it</label>' +
-      '<select class="select" style="margin:0 0 6px 0;" onchange="examBuilderState.tBoard=this.value; examBuilderState.tSem=\'ALL\'; renderExamBuilderModalBody()">' +
-        '<option value="ALL"' + (st.tBoard === 'ALL' ? ' selected' : '') + '>🌐 All boards together (' + clsStus.length + ')</option>' +
+    '<div><label class="label">👥 Which students take it — tick one or more boards</label>' +
+      '<div style="display:flex; flex-wrap:wrap; gap:6px; margin:0 0 6px 0;">' +
+        '<label class="col-pill" style="cursor:pointer;"><input type="checkbox"' + (st.tBoard === 'ALL' ? ' checked' : '') + ' onchange="ebBoardAll()"> 🌐 All boards (' + clsStus.length + ')</label>' +
         BOARD_GROUPS.map(function(g) {
           var n = clsStus.filter(function(u) { return boardGroup(u.board) === g[0]; }).length;
-          return '<option value="' + g[0] + '"' + (st.tBoard === g[0] ? ' selected' : '') + '>Only ' + esc(boardLabel(g[0], st.targetClass)) + ' (' + n + ')</option>';
+          if (!n && picked.indexOf(g[0]) === -1) return '';
+          return '<label class="col-pill" style="cursor:pointer;"><input type="checkbox" class="eb-bd"' + (picked.indexOf(g[0]) !== -1 ? ' checked' : '') + ' value="' + g[0] + '" onchange="ebBoardTick()"> ' + esc(boardLabel(g[0], st.targetClass)) + ' (' + n + ')</label>';
         }).join('') +
-      '</select>' +
+      '</div>' +
       (st.tBoard === 'WB' && sems.length
         ? '<select class="select" style="margin:0 0 6px 0;" onchange="examBuilderState.tSem=this.value; renderExamBuilderModalBody()">' +
             '<option value="ALL"' + (st.tSem === 'ALL' ? ' selected' : '') + '>All semesters</option>' +
@@ -12801,7 +12804,7 @@ function saveExamFromBuilder() {
     targetBoard: jeeMode ? 'ALL' : (st.tBoard || 'ALL'),
     targetSem: jeeMode ? 'ALL' : (st.tSem || 'ALL'),
     // the label shown on the exam cards
-    board: jeeMode ? (st.board || '') : (st.tBoard && st.tBoard !== 'ALL' ? boardLabel(st.tBoard, st.targetClass) + (st.tSem && st.tSem !== 'ALL' ? ' · ' + semName(st.tSem) : '') : 'All boards'),
+    board: jeeMode ? (st.board || '') : (st.tBoard && st.tBoard !== 'ALL' ? String(st.tBoard).split(',').map(function(b) { return boardLabel(b, st.targetClass); }).join(' + ') + (st.tSem && st.tSem !== 'ALL' ? ' · ' + semName(st.tSem) : '') : 'All boards'),
     chapters: st.chapters.slice(),
     subs: Object.keys(st.subs || {}).filter(function(k) { return st.subs[k]; }),
     diffMix: useMix && !picked.length ? mix : null,
@@ -12824,7 +12827,7 @@ function saveExamFromBuilder() {
   };
   // 👤 only for some students
   var ebCand = jeeMode ? DB.get(K.U).filter(isActiveStu).filter(function(u) { return stuJee(u).indexOf(st.targetClass) !== -1; })
-    : DB.get(K.U).filter(isActiveStu).filter(function(u) { return (u.studentClass || u.batch || '') === st.targetClass && (!st.targetBatchNo || st.targetBatchNo === 'ALL' || (u.batchNo || 'Batch 01') === st.targetBatchNo) && (st.tBoard === 'ALL' || boardGroup(u.board) === st.tBoard) && (st.tSem === 'ALL' || (u.semester || '') === st.tSem); });
+    : DB.get(K.U).filter(isActiveStu).filter(function(u) { return (u.studentClass || u.batch || '') === st.targetClass && (!st.targetBatchNo || st.targetBatchNo === 'ALL' || (u.batchNo || 'Batch 01') === st.targetBatchNo) && boardInTarget(st.tBoard, u) && (st.tSem === 'ALL' || (u.semester || '') === st.tSem); });
   var ebOnly = onlyResult('exam', ebCand);
   if (ebOnly === false) { showToast('Tick at least one student, or choose "Everyone".', 'error'); return; }
   testObj.onlyFor = ebOnly || null;
@@ -12848,6 +12851,19 @@ function examWindowState(t) {
   return 'live';
 }
 
+// 🏫 an exam's boards: "ALL", one board ("CISCE") or several together ("CISCE,CBSE")
+function boardInTarget(target, u) {
+  if (!target || target === 'ALL') return true;
+  return String(target).split(',').indexOf(boardGroup(u.board)) !== -1;
+}
+function ebBoardAll() { examBuilderState.tBoard = 'ALL'; examBuilderState.tSem = 'ALL'; renderExamBuilderModalBody(); }
+function ebBoardTick() {
+  var v = [];
+  document.querySelectorAll('.eb-bd:checked').forEach(function(c) { v.push(c.value); });
+  examBuilderState.tBoard = v.length ? v.join(',') : 'ALL';
+  examBuilderState.tSem = 'ALL';
+  renderExamBuilderModalBody();
+}
 var testsCls = 'ALL';      // the class whose exams are shown (Exams page)
 function renderAdminTestsContent() {
   var tests = DB.get(K.T);
@@ -12992,7 +13008,7 @@ function sdAssignedTests(u, uClass) {
     if (u.courseSchool === false) return false;   // JEE-only student: no class-batch exams
     if (t.targetBatchNo && t.targetBatchNo !== 'ALL' && (u.batchNo || 'Batch 01') !== t.targetBatchNo) return false;
     // an exam for one board (and, for West Bengal, one semester) — "ALL" = every board together
-    if (t.targetBoard && t.targetBoard !== 'ALL' && boardGroup(u.board) !== t.targetBoard) return false;
+    if (!boardInTarget(t.targetBoard, u)) return false;     // one or several boards ("ICSE,CBSE")
     if (t.targetSem && t.targetSem !== 'ALL' && (u.semester || '') !== t.targetSem) return false;
     if (!t.targetBatch || t.targetBatch === 'ALL') return true;
     if (t.targetBatch === uClass) return true;

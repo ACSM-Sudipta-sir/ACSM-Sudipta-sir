@@ -3069,7 +3069,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261117220117';
+var APP_BUILD = '20261118183620';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -3444,7 +3444,8 @@ function boardSemBar(stus, renderFn) {
 }
 var stuFeeStatusFilter = 'ALL';
 var stuSearchQuery = '';
-var selectedFeeYear = String(new Date().getFullYear());
+var feeSumYm = '';             // the fee month whose totals are shown (empty = this month)
+var selectedFeeYear = String(new Date().getMonth() >= 2 ? new Date().getFullYear() : new Date().getFullYear() - 1);   // the SESSION (Mar → Feb) shown in the fee ledger
 var selectedCheckMonth = '10';
 
 // --- GEMINI AI API HELPER ---
@@ -6300,12 +6301,12 @@ function renderStudentDashContent(live) {
     var qrSrc = payCfg.qrDataUrl ? payCfg.qrDataUrl : FALLBACK_QR;
     var myFees = validFees().filter(function(f) { return f.studentId === u.id; })
       .sort(function(a, b) { return String(b.paymentDate || '').localeCompare(String(a.paymentDate || '')); });
-    var thisYear = String(new Date().getFullYear());
+    var thisYear = sessionLabel(sessionOf());       // the session Mar → Feb
     var pills = '';
-    for (var mi = 0; mi < 12; mi++) {
-      var paidM = getStudentMonthStatus(u.id, thisYear, MONTH_KEYS[mi]) === 'paid';
-      pills += '<span class="' + (paidM ? 'm-paid' : 'm-due') + '">' + MONTH_NAMES[mi] + (paidM ? ' ✓' : '') + '</span>';
-    }
+    sessionYms(sessionOf()).forEach(function(ym) {
+      var paidM = getStudentMonthStatus(u.id, ym.slice(0, 4), ym.slice(5, 7)) === 'paid';
+      pills += '<span class="' + (paidM ? 'm-paid' : 'm-due') + '">' + ymShort(ym) + (paidM ? ' ✓' : '') + '</span>';
+    });
     var receiptCards = myFees.map(function(f) {
       return '<div class="card receipt-card">' +
         '<div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:center;">' +
@@ -6514,14 +6515,24 @@ function viewSubmissionDetail(subId) {
 // ============================================================================
 
 
+// 📅 THE SESSION: March → February (session 2026 = "2026-27" = Mar 2026 … Dec 2026, Jan 2027, Feb 2027)
+var SESSION_MKS = ['03','04','05','06','07','08','09','10','11','12','01','02'];
+function sessionOf(d) { d = d || new Date(); return d.getMonth() >= 2 ? d.getFullYear() : d.getFullYear() - 1; }
+function sessionLabel(s) { s = Number(s); return s + '-' + String(s + 1).slice(2); }
+function sessionYm(s, mk) { return (Number(mk) >= 3 ? Number(s) : Number(s) + 1) + '-' + mk; }
+function sessionYms(s) { return SESSION_MKS.map(function(mk) { return sessionYm(s, mk); }); }
+function ymShort(ym) { return (MONTH_NAMES[Number(ym.slice(5, 7)) - 1] || '') + ' ' + ym.slice(2, 4); }
+// the exact months (YYYY-MM) one payment is for — new payments keep them; older ones: year + month numbers
+function feeYms(f) {
+  if (Array.isArray(f.ym) && f.ym.length) return f.ym;
+  return (Array.isArray(f.months) ? f.months : []).map(function(mk) { return String(f.year || '2026') + '-' + mk; });
+}
 function getStudentMonthStatus(studentId, year, monthKey) {
-  var fees = DB.get(K.FEES).filter(function(f) {
-    return f.studentId === studentId && String(f.year || '2026') === String(year);
-  });
+  var want = String(year) + '-' + monthKey;
+  var fees = DB.get(K.FEES).filter(function(f) { return f.studentId === studentId; });
   var foundApproved = false, foundPending = false, hasDueBalance = false;
   for (var i = 0; i < fees.length; i++) {
-    var mArr = Array.isArray(fees[i].months) ? fees[i].months : [];
-    if (mArr.indexOf(monthKey) !== -1) {
+    if (feeYms(fees[i]).indexOf(want) !== -1) {
       if (fees[i].status === 'pending') foundPending = true;
       else {
         foundApproved = true;
@@ -7168,12 +7179,11 @@ function renderAdminFeesContent() {
     var u = filtered[i];
     var uClass = u.studentClass || u.batch || 'Class 12';
     var grid = '';
-    for (var mIdx = 0; mIdx < 12; mIdx++) {
-      var mKey = MONTH_KEYS[mIdx];
-      var mSt = getStudentMonthStatus(u.id, selectedFeeYear, mKey);
+    sessionYms(selectedFeeYear).forEach(function(ym) {
+      var mSt = getStudentMonthStatus(u.id, ym.slice(0, 4), ym.slice(5, 7));
       var cls = mSt === 'paid' ? 'm-paid' : 'm-due';
-      grid += '<span class="m-pill ' + cls + '" onclick="feePillClick(\'' + escA(u.id) + '\', \'' + mKey + '\')">' + MONTH_NAMES[mIdx] + (mSt === 'paid' ? ' ✓' : '') + '</span>';
-    }
+      grid += '<span class="m-pill ' + cls + '" onclick="feePillClick(\'' + escA(u.id) + '\', \'' + ym + '\')">' + ymShort(ym) + (mSt === 'paid' ? ' ✓' : '') + '</span>';
+    });
     rowsHtml +=
       '<tr>' +
         stuIdentCell(u) +
@@ -7198,11 +7208,11 @@ function renderAdminFeesContent() {
         '</div>' +
       '</div>' +
       renderFeeStatsHtml() +
-      '<div style="display:flex; align-items:center; gap:8px; margin:0 0 12px 0;"><label class="label" style="margin:0;">Ledger year</label><select class="select" style="max-width:120px; margin:0;" onchange="changeFeeYear(this.value)">' + feeYearOptions() + '</select></div>' +
+      '<div style="display:flex; align-items:center; gap:8px; margin:0 0 12px 0;"><label class="label" style="margin:0;">Session (Mar → Feb)</label><select class="select" style="max-width:120px; margin:0;" onchange="changeFeeYear(this.value)">' + feeYearOptions() + '</select></div>' +
       '<div class="part-bar">' + classTabsFor(activeStus, 'renderAdminFeesContent') + '</div>' +
       boardSemBar(activeStus, 'renderAdminFeesContent') +
       '<div class="bulk-bar"><input type="text" id="stu-search" class="input" style="max-width:260px; margin:0;" placeholder="🔎 Search name / number" value="' + escA(stuSearchQuery) + '" oninput="stuSearchInput(this.value)"></div>' +
-      '<div class="qb-table-wrap"><table class="qb-table"><thead><tr><th>Student</th><th>Class / Batch</th><th>Fee</th><th>12-Month Grid (' + esc(selectedFeeYear) + ')</th><th>Actions</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
+      '<div class="qb-table-wrap"><table class="qb-table"><thead><tr><th>Student</th><th>Class / Batch</th><th>Fee</th><th>Session ' + esc(sessionLabel(selectedFeeYear)) + ' (Mar → Feb)</th><th>Actions</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
     '</div>';
 }
 
@@ -7257,39 +7267,40 @@ function renderFeeStatsHtml() {
     return '<div class="lock-card" onclick="toggleFeeLock()">🔒 <b>Fee collection totals are hidden.</b><br><span style="font-size:0.78rem; color:var(--text-muted);">Tap here to view this month, this year and all-time totals (hides again by itself).</span></div>';
   }
   var t = feeTotals();
-  var now = new Date();
-  var rows = '', max = 1, keys = [];
-  for (var i = 5; i >= 0; i--) {
-    var d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    var key = localDateStr(d).slice(0, 7);
-    keys.push([key, MONTH_NAMES[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2)]);
-    if ((t.byMonth[key] || 0) > max) max = t.byMonth[key];
-  }
-  keys.forEach(function(k) {
-    var v = t.byMonth[k[0]] || 0;
-    rows += '<div class="bar-row"><span class="bar-lab">' + k[1] + '</span><span class="bar-track"><span class="bar-fill" style="width:' + Math.round(v / max * 100) + '%;"></span></span><span class="bar-val">' + fmtINR(v) + '</span></div>';
+  var now = new Date(), curYm = localDateStr(now).slice(0, 7), ses = sessionOf(now);
+  if (!feeSumYm) feeSumYm = curYm;
+  // the bars: every month of the session (Mar → Feb), money counted in the month it is FOR
+  var rows = '', max = 1, yms = sessionYms(ses);
+  yms.forEach(function(m) { if ((t.byFee[m] || 0) > max) max = t.byFee[m]; });
+  yms.forEach(function(m) {
+    var v = Math.round(t.byFee[m] || 0);
+    rows += '<div class="bar-row" style="cursor:pointer;' + (m === feeSumYm ? ' outline:1px solid #fcd34d; border-radius:6px;' : '') + '" onclick="feeSumYm=\'' + m + '\'; rerenderMoney()"><span class="bar-lab">' + ymShort(m) + '</span><span class="bar-track"><span class="bar-fill" style="width:' + Math.round(v / max * 100) + '%;"></span></span><span class="bar-val">' + fmtINR(v) + '</span></div>';
   });
-  return '<div class="grid-3" style="margin-bottom:12px;">' +
-      '<div class="stat-mini"><div class="sm-l">This month</div><div class="sm-v" style="color:#34d399;">' + fmtINR(t.month) + '</div></div>' +
-      '<div class="stat-mini"><div class="sm-l">This year (' + now.getFullYear() + ')</div><div class="sm-v">' + fmtINR(t.year) + '</div></div>' +
-      '<div class="stat-mini"><div class="sm-l">All time</div><div class="sm-v">' + fmtINR(t.all) + '</div></div>' +
+  var opts = '';
+  for (var s0 = ses - 1; s0 <= ses; s0++) sessionYms(s0).forEach(function(m) { if (m <= curYm || s0 === ses) opts += '<option value="' + m + '"' + (m === feeSumYm ? ' selected' : '') + '>' + MONTH_FULL[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4) + '</option>'; });
+  var ms = monthFeeSummary(DB.get(K.U).filter(isActiveStu), feeSumYm.slice(0, 4), feeSumYm.slice(5, 7));
+  var mn = MONTH_FULL[Number(feeSumYm.slice(5, 7)) - 1] + ' ' + feeSumYm.slice(0, 4);
+  return '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;"><span class="label" style="margin:0;">📋 Fee month</span>' +
+      '<select class="select" style="max-width:180px; margin:0;" onchange="feeSumYm=this.value; rerenderMoney()">' + opts + '</select>' +
+      '<span style="font-size:0.76rem; color:var(--text-muted);">money is counted in the month it is FOR, whatever the date it was paid</span></div>' +
+    '<div class="grid-3" style="margin-bottom:12px;">' +
+      '<div class="stat-mini"><div class="sm-l">📋 Total fee for ' + mn + ' (' + ms.total + ' students)</div><div class="sm-v" style="color:#fcd34d;">' + fmtINR(ms.expected) + '</div><div style="font-size:0.7rem; color:var(--text-muted);">all students\' monthly fees added</div></div>' +
+      '<div class="stat-mini"><div class="sm-l">✅ Paid for ' + mn + ' (' + (ms.paidCount + ms.partialCount) + ' students)</div><div class="sm-v" style="color:#34d399;">' + fmtINR(ms.collected) + '</div></div>' +
+      '<div class="stat-mini"><div class="sm-l">⏳ Still due for ' + mn + ' (' + (ms.total - ms.paidCount) + ' students)</div><div class="sm-v" style="color:#f87171;">' + fmtINR(ms.due) + '</div></div>' +
     '</div>' +
-    (function() {
-      var ms = monthFeeSummary(DB.get(K.U).filter(isActiveStu));
-      var mn = MONTH_FULL[now.getMonth()] + ' ' + now.getFullYear();
-      return '<div class="grid-3" style="margin-bottom:12px;">' +
-        '<div class="stat-mini"><div class="sm-l">📋 Total fee for ' + mn + ' (' + ms.total + ' students)</div><div class="sm-v" style="color:#fcd34d;">' + fmtINR(ms.expected) + '</div></div>' +
-        '<div class="stat-mini"><div class="sm-l">✅ Paid for ' + mn + ' (' + (ms.paidCount + ms.partialCount) + ' students)</div><div class="sm-v" style="color:#34d399;">' + fmtINR(ms.collected) + '</div></div>' +
-        '<div class="stat-mini"><div class="sm-l">⏳ Still due (' + (ms.total - ms.paidCount) + ' students)</div><div class="sm-v" style="color:#f87171;">' + fmtINR(ms.due) + '</div></div>' +
-      '</div>';
-    })() +
+    '<div class="grid-3" style="margin-bottom:12px;">' +
+      '<div class="stat-mini"><div class="sm-l">💰 Received in ' + MONTH_FULL[now.getMonth()] + ' (' + t.monthCount + ' payments, any month)</div><div class="sm-v" style="color:#34d399;">' + fmtINR(t.month) + '</div></div>' +
+      '<div class="stat-mini"><div class="sm-l">↩ of it, old dues of earlier months (' + t.backCount + ')</div><div class="sm-v" style="color:#93c5fd;">' + fmtINR(Math.round(t.back)) + '</div></div>' +
+      '<div class="stat-mini"><div class="sm-l">📅 Session ' + sessionLabel(ses) + ' collected • all time ' + fmtINR(t.all) + '</div><div class="sm-v">' + fmtINR(Math.round(t.session)) + '</div></div>' +
+    '</div>' +
+    '<div style="font-size:0.76rem; color:var(--text-muted); margin:0 0 4px 0;">Session ' + sessionLabel(ses) + ' — fee collected for each month (tap a month to see its totals above)</div>' +
     '<div class="bars">' + rows + '</div>' +
     '<div style="margin:-4px 0 12px 0;"><button type="button" class="btn btn-slate btn-xs" onclick="toggleFeeLock()">🔒 Hide totals</button></div>';
 }
 
 function feeYearOptions() {
   var now = new Date().getFullYear(), out = '';
-  for (var y = 2020; y <= now + 10; y++) out += '<option value="' + y + '"' + (String(y) === String(selectedFeeYear) ? ' selected' : '') + '>' + y + '</option>';
+  for (var y = 2020; y <= now + 5; y++) out += '<option value="' + y + '"' + (String(y) === String(selectedFeeYear) ? ' selected' : '') + '>' + sessionLabel(y) + '</option>';
   return out;
 }
 
@@ -9774,19 +9785,25 @@ function fmtDateShort(iso) {
 
 function validFees() { return DB.get(K.FEES).filter(function(f) { return f.status !== 'pending'; }); }
 
-// money received, grouped by the date it was received
+// money totals. byFee = by the month the fee is FOR (October's fee paid on 3 November counts in October);
+// month / monthCount = what came in this month (by date); back = of that, the fees of EARLIER months (old dues)
 function feeTotals() {
   var now = new Date();
-  var ym = localDateStr(now).slice(0, 7), y = String(now.getFullYear());
-  var t = { month: 0, year: 0, all: 0, monthCount: 0, byMonth: {} };
+  var ym = localDateStr(now).slice(0, 7), ses = sessionOf(now), sesYms = sessionYms(ses);
+  var t = { month: 0, monthCount: 0, back: 0, backCount: 0, session: 0, year: 0, all: 0, byFee: {}, byMonth: {} };
   validFees().forEach(function(f) {
-    var amt = Number(f.amountPaid || 0);
-    var d = String(f.paymentDate || '');
+    var amt = Number(f.amountPaid || 0), yms = feeYms(f), d = String(f.paymentDate || '');
     t.all += amt;
-    if (d.slice(0, 4) === y) t.year += amt;
-    if (d.slice(0, 7) === ym) { t.month += amt; t.monthCount++; }
+    var each = yms.length ? amt / yms.length : 0;
+    yms.forEach(function(m) { t.byFee[m] = (t.byFee[m] || 0) + each; if (sesYms.indexOf(m) !== -1) t.session += each; });
+    if (d.slice(0, 7) === ym) {
+      t.month += amt; t.monthCount++;
+      var old = yms.filter(function(m) { return m < ym; }).length;
+      if (old) { t.back += each * old; t.backCount++; }
+    }
     if (d.length >= 7) t.byMonth[d.slice(0, 7)] = (t.byMonth[d.slice(0, 7)] || 0) + amt;
   });
+  t.year = t.session;
   return t;
 }
 
@@ -9797,27 +9814,32 @@ function monthFeeSummary(stus, year, mKey) {
   year = String(year || now.getFullYear());
   mKey = mKey || MONTH_KEYS[now.getMonth()];
   var s = { expected: 0, collected: 0, due: 0, paidCount: 0, partialCount: 0, pendingCount: 0, dueCount: 0, total: 0, byId: {} };
-  var fees = validFees();
+  var fees = validFees(), want = year + '-' + mKey;
   (stus || []).forEach(function(u) {
     var fee = Number(u.monthlyFee || 0);
     var st = getStudentMonthStatus(u.id, year, mKey);
-    var got = 0;
-    if (st === 'paid') { got = fee; s.paidCount++; }
-    else if (st === 'partial') {
-      var bal = 0;
-      fees.forEach(function(f) {
-        if (f.studentId === u.id && String(f.year || '2026') === year && (f.months || []).indexOf(mKey) !== -1) bal = Math.max(bal, Number(f.dueBalance || 0));
-      });
-      got = Math.max(0, fee - bal); s.partialCount++;
-    }
+    // what really came in FOR this month (a payment for 3 months counts one third here)
+    var got = 0, bal = 0;
+    fees.forEach(function(f) {
+      if (f.studentId !== u.id) return;
+      var yms = feeYms(f);
+      if (yms.indexOf(want) === -1) return;
+      got += Number(f.amountPaid || 0) / yms.length;
+      bal = Math.max(bal, Number(f.dueBalance || 0));
+    });
+    got = Math.round(got);
+    if (st === 'paid') s.paidCount++;
+    else if (st === 'partial') { s.partialCount++; if (!got) got = Math.max(0, fee - bal); }
     else if (st === 'pending') s.pendingCount++;
     else s.dueCount++;
     s.total++;
     s.expected += fee;
     s.collected += got;
-    s.byId[u.id] = { status: st, got: got, left: Math.max(0, fee - got) };
+    var left = st === 'paid' ? 0 : Math.max(0, fee - got);      // a month marked paid has nothing left to pay
+    s.due += left;
+    s.byId[u.id] = { status: st, got: got, left: left };
   });
-  s.due = Math.max(0, s.expected - s.collected);
+  s.due = Math.round(s.due);
   return s;
 }
 
@@ -9831,9 +9853,15 @@ function nextReceiptNo(year) {
   return 'RCPT-' + year + '-' + (max + 1);
 }
 
+// "Oct, Nov 2026" / "Dec 2026, Jan, Feb 2027"
 function monthsLabel(fee) {
-  var names = (Array.isArray(fee.months) ? fee.months : []).slice().sort().map(function(mk) { return MONTH_NAMES[Number(mk) - 1] || mk; });
-  return names.join(', ') + ' ' + (fee.year || '');
+  var yms = feeYms(fee).slice().sort(), out = [], i = 0;
+  while (i < yms.length) {
+    var y = yms[i].slice(0, 4), names = [];
+    while (i < yms.length && yms[i].slice(0, 4) === y) { names.push(MONTH_NAMES[Number(yms[i].slice(5, 7)) - 1] || yms[i]); i++; }
+    out.push(names.join(', ') + ' ' + y);
+  }
+  return out.join(', ');
 }
 
 function studentOfFee(fee) {
@@ -9841,14 +9869,13 @@ function studentOfFee(fee) {
 }
 
 // click on a month in the ledger: paid -> receipt, otherwise record a payment
-function feePillClick(stuId, mKey) {
-  if (getStudentMonthStatus(stuId, selectedFeeYear, mKey) === 'paid') {
-    var rec = validFees().find(function(f) {
-      return f.studentId === stuId && String(f.year) === String(selectedFeeYear) && (f.months || []).indexOf(mKey) !== -1;
-    });
+function feePillClick(stuId, ym) {
+  if (!/^\d{4}-\d{2}$/.test(String(ym))) ym = sessionYm(selectedFeeYear, ym);     // (an old call with only the month)
+  if (getStudentMonthStatus(stuId, ym.slice(0, 4), ym.slice(5, 7)) === 'paid') {
+    var rec = validFees().find(function(f) { return f.studentId === stuId && feeYms(f).indexOf(ym) !== -1; });
     if (rec) return openReceiptModal(rec.id);
   }
-  openFeeCollectionModal(stuId, mKey);
+  openFeeCollectionModal(stuId, ym);
 }
 
 // ---------------- record a payment ----------------
@@ -9865,27 +9892,32 @@ function openFeeCollectionModal(stuId, preselectMonth) {
   var u = DB.get(K.U).find(function(s) { return s.id === stuId; });
   if (!u) return;
   feeAmtDirty = false;
+  if (preselectMonth && !/^\d{4}-\d{2}$/.test(String(preselectMonth))) preselectMonth = sessionYm(selectedFeeYear, preselectMonth);
+  if (preselectMonth) selectedFeeYear = String(sessionOf(new Date(Number(preselectMonth.slice(0, 4)), Number(preselectMonth.slice(5, 7)) - 1, 1)));
   var mChecksHtml = '';
-  for (var i = 0; i < 12; i++) {
-    var mk = MONTH_KEYS[i];
-    var paid = getStudentMonthStatus(stuId, selectedFeeYear, mk) === 'paid';
-    var isPre = (preselectMonth === mk) && !paid;
-    mChecksHtml += '<label class="col-pill" style="cursor:' + (paid ? 'default' : 'pointer') + '; ' + (paid ? 'opacity:0.55;' : '') + '"><input type="checkbox" class="adm-fee-mchk" value="' + mk + '" ' + (isPre ? 'checked' : '') + (paid ? ' disabled' : '') + ' onchange="updateFeeAmount()"> ' + MONTH_NAMES[i] + (paid ? ' ✓' : '') + '</label>';
-  }
+  sessionYms(selectedFeeYear).forEach(function(ym) {
+    var paid = getStudentMonthStatus(stuId, ym.slice(0, 4), ym.slice(5, 7)) === 'paid';
+    var isPre = (preselectMonth === ym) && !paid;
+    mChecksHtml += '<label class="col-pill" style="cursor:' + (paid ? 'default' : 'pointer') + '; ' + (paid ? 'opacity:0.55;' : '') + '"><input type="checkbox" class="adm-fee-mchk" value="' + ym + '" ' + (isPre ? 'checked' : '') + (paid ? ' disabled' : '') + ' onchange="updateFeeAmount()"> ' + ymShort(ym) + (paid ? ' ✓' : '') + '</label>';
+  });
   var nPre = Math.max(1, preselectMonth ? 1 : 0);
+  var sesOpts = '';
+  for (var sy = sessionOf() - 3; sy <= sessionOf() + 1; sy++) sesOpts += '<option value="' + sy + '"' + (String(sy) === String(selectedFeeYear) ? ' selected' : '') + '>' + sessionLabel(sy) + '</option>';
   document.getElementById('row-editor-body').innerHTML =
     '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">' +
       '<h3 style="margin:0;">💳 Record Fee — ' + esc(u.fullName) + '</h3>' +
       '<button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button>' +
     '</div>' +
     '<input type="hidden" id="fc-stu" value="' + escA(u.id) + '">' +
-    '<div style="font-size:0.78rem; color:var(--text-muted); margin-bottom:6px;">Months of ' + esc(selectedFeeYear) + ' (✓ = already received)</div>' +
+    '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;"><span style="font-size:0.78rem; color:var(--text-muted);">Session</span>' +
+      '<select class="select" style="max-width:130px; margin:0;" onchange="selectedFeeYear=this.value; openFeeCollectionModal(\'' + escA(u.id) + '\')">' + sesOpts + '</select>' +
+      '<span style="font-size:0.78rem; color:var(--text-muted);">Mar → Feb • tick the months this money is FOR (✓ = already received). An old due? choose the earlier session.</span></div>' +
     '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">' + mChecksHtml + '</div>' +
     '<div class="grid-2">' +
       '<div><label class="label">Amount received (₹)</label><input type="number" id="fc-amt" class="input" value="' + Number((u.monthlyFee || 800) * nPre) + '" oninput="feeAmtDirty=true"></div>' +
       '<div><label class="label">Date received</label><input type="date" id="fc-date" class="input" value="' + localDateStr() + '"></div>' +
-      '<div><label class="label">Mode</label><select id="fc-mode" class="select"><option value="Online (QR / UPI)">Online (QR / UPI)</option><option value="Offline (Cash)">Offline (Cash)</option></select></div>' +
-      '<div><label class="label">UPI transaction ID / note (optional)</label><input type="text" id="fc-ref" class="input" placeholder="e.g. 4123 … or “paid to teacher”"></div>' +
+      '<div><label class="label">Mode</label><select id="fc-mode" class="select"><option value="Online">Online</option><option value="Offline">Offline</option></select></div>' +
+      '<div><label class="label">Reference no. (optional)</label><input type="text" id="fc-ref" class="input" placeholder="can be left empty"></div>' +
     '</div>' +
     '<div style="display:flex; justify-content:flex-end; gap:8px;">' +
       '<button type="button" onclick="saveAdminFeeCollection(\'' + escA(u.id) + '\')" class="btn btn-green">✓ Save Payment</button>' +
@@ -9903,12 +9935,15 @@ function saveAdminFeeCollection(stuId) {
   var date = document.getElementById('fc-date').value;
   if (!date) { showToast('Choose the date the money was received.', 'error'); return; }
   var fees = DB.get(K.FEES);
+  months.sort();
   var rec = {
     id: 'fee_' + Date.now(),
-    receiptNo: nextReceiptNo(selectedFeeYear),
+    receiptNo: nextReceiptNo(date.slice(0, 4)),
     studentId: stuId,
-    year: selectedFeeYear,
-    months: months,
+    session: Number(selectedFeeYear),             // the session (Mar → Feb) it belongs to
+    ym: months,                                    // the exact months it is FOR, e.g. ["2026-12","2027-01"]
+    year: months[0].slice(0, 4),                   // (older parts of the app read these two)
+    months: months.map(function(m) { return m.slice(5, 7); }),
     amountPaid: amt,
     paymentDate: date,
     paymentMode: document.getElementById('fc-mode').value,
@@ -9965,6 +10000,7 @@ function openStudentPaymentsModal(stuId) {
       '<div style="font-size:0.76rem; color:var(--text-muted); margin:3px 0 8px 0;">' + esc(f.receiptNo || '') + ' • ' + fmtDateShort(f.paymentDate) + ' • ' + esc(f.paymentMode || '') + (f.reference ? ' • ' + esc(f.reference) : '') + '</div>' +
       '<div style="display:flex; gap:6px; flex-wrap:wrap;">' +
         '<button type="button" class="btn btn-amber btn-xs" onclick="openReceiptModal(\'' + escA(f.id) + '\')">🧾 Receipt</button>' +
+        '<button type="button" class="btn btn-purple btn-xs" onclick="openFeeMonthsEdit(\'' + escA(f.id) + '\')">📅 Change months</button>' +
         '<a class="btn btn-green btn-xs" style="color:#fff;" target="_blank" rel="noopener" href="' + escA(whatsappFeeLink(f, u.whatsapp || u.id)) + '">💬 WhatsApp</a>' +
         '<button type="button" id="del-fee-' + escA(f.id) + '" class="btn btn-red btn-xs" onclick="deleteFeeRecord(\'' + escA(f.id) + '\', \'' + escA(stuId) + '\')">🗑️ Delete</button>' +
       '</div></div>';
@@ -9979,6 +10015,39 @@ function openStudentPaymentsModal(stuId) {
   document.getElementById('row-editor-modal').classList.remove('hidden');
 }
 
+// 📅 a payment saved under the wrong months / year (e.g. Jan–Feb that belong to the NEXT year): put it right
+function openFeeMonthsEdit(feeId, ses) {
+  var f = DB.get(K.FEES).find(function(x) { return x.id === feeId; });
+  if (!f) return;
+  var cur = feeYms(f);
+  if (ses === undefined) ses = cur.length ? sessionOf(new Date(Number(cur[0].slice(0, 4)), Number(cur[0].slice(5, 7)) - 1, 1)) : sessionOf();
+  var opts = '';
+  for (var sy = sessionOf() - 3; sy <= sessionOf() + 1; sy++) opts += '<option value="' + sy + '"' + (sy === Number(ses) ? ' selected' : '') + '>' + sessionLabel(sy) + '</option>';
+  var chks = sessionYms(ses).map(function(ym) {
+    return '<label class="col-pill" style="cursor:pointer;"><input type="checkbox" class="fme-chk" value="' + ym + '"' + (cur.indexOf(ym) !== -1 ? ' checked' : '') + '> ' + ymShort(ym) + '</label>';
+  }).join('');
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h3 style="margin:0;">📅 Change the months of this payment</h3><button type="button" onclick="openStudentPaymentsModal(\'' + escA(f.studentId) + '\')" class="btn btn-slate btn-sm">◀ Back</button></div>' +
+    '<p style="margin:0 0 8px 0; font-size:0.84rem;">' + esc(studentOfFee(f).fullName || '') + ' • ' + fmtINR(f.amountPaid) + ' • paid on ' + fmtDateShort(f.paymentDate) + '<br>Now saved for: <b style="color:#fcd34d;">' + esc(monthsLabel(f)) + '</b></p>' +
+    '<div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;"><span style="font-size:0.8rem; color:var(--text-muted);">Session</span><select class="select" style="max-width:130px; margin:0;" onchange="openFeeMonthsEdit(\'' + escA(feeId) + '\', Number(this.value))">' + opts + '</select></div>' +
+    '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">' + chks + '</div>' +
+    '<div style="display:flex; justify-content:flex-end;"><button type="button" class="btn btn-green" onclick="saveFeeMonthsEdit(\'' + escA(feeId) + '\', ' + Number(ses) + ')">✓ Save months</button></div>';
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+}
+function saveFeeMonthsEdit(feeId, ses) {
+  var yms = [];
+  document.querySelectorAll('.fme-chk:checked').forEach(function(c) { yms.push(c.value); });
+  if (!yms.length) { showToast('Tick at least one month.', 'error'); return; }
+  yms.sort();
+  var fees = DB.get(K.FEES), f = fees.find(function(x) { return x.id === feeId; });
+  if (!f) return;
+  f.ym = yms; f.session = Number(ses); f.year = yms[0].slice(0, 4); f.months = yms.map(function(m) { return m.slice(5, 7); });
+  DB.set(K.FEES, fees);
+  updateFeeCorner();
+  rerenderMoney();
+  showToast('📅 Saved for ' + monthsLabel(f) + '.', 'success');
+  openStudentPaymentsModal(f.studentId);
+}
 function deleteFeeRecord(feeId, stuId) {
   if (armedDeleteFee !== feeId) {
     armedDeleteFee = feeId;

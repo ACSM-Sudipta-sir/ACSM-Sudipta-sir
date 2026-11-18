@@ -3411,7 +3411,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118232112';
+var APP_BUILD = '20261118232445';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -7681,11 +7681,19 @@ function renderFeeStatsHtml() {
     '</div>' +
     // 💰 the money that came in THIS calendar month, split by what it is for
     '<div style="font-size:0.8rem; font-weight:800; color:#e2e8f0; margin:2px 0 6px 0;">💰 Money received in ' + MONTH_FULL[now.getMonth()] + ' ' + now.getFullYear() + ': <span style="color:#34d399;">' + fmtINR(t.month) + '</span> <span style="font-weight:600; color:var(--text-muted);">(' + t.monthCount + ' payment' + (t.monthCount === 1 ? '' : 's') + ')</span> &nbsp;🌐 Online <span style="color:#34d399;">' + fmtINR(t.monthOn || 0) + '</span> • 💵 Offline <span style="color:#fcd34d;">' + fmtINR(t.monthOff || 0) + '</span></div>' +
-    '<div class="grid-3" style="margin-bottom:8px;">' +
-      '<div class="stat-mini"><div class="sm-l">✅ for ' + MONTH_FULL[now.getMonth()] + ' itself (' + t.curCount + ')</div><div class="sm-v" style="color:#34d399;">' + fmtINR(Math.round(t.cur)) + '</div></div>' +
-      '<div class="stat-mini"><div class="sm-l">↩ old dues — earlier months (' + t.backCount + ')</div><div class="sm-v" style="color:#93c5fd;">' + fmtINR(Math.round(t.back)) + '</div></div>' +
-      '<div class="stat-mini"><div class="sm-l">⏩ advance — coming months (' + t.advCount + ')</div><div class="sm-v" style="color:#c4b5fd;">' + fmtINR(Math.round(t.adv)) + '</div></div>' +
-    '</div>' +
+    // the 4 kinds of money (tap any for the students): running • dues cleared • advance • still due
+    (function() {
+      var od = feeOutstanding();
+      var tile = function(onclick, label, amt, color, sub) {
+        return '<div class="stat-mini" style="cursor:pointer;" onclick="' + onclick + '"><div class="sm-l">' + label + '</div><div class="sm-v" style="color:' + color + ';">' + fmtINR(Math.round(amt)) + '</div><div style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">' + sub + ' • tap for the list</div></div>';
+      };
+      return '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:10px; margin-bottom:8px;">' +
+        tile('openFeeKindList(\'run\')', '🟢 Running — ' + MONTH_FULL[now.getMonth()] + '\'s own fee', t.cur, '#34d399', t.curCount + ' payment(s) this month') +
+        tile('openFeeKindList(\'back\')', '↩ Dues cleared this month (earlier months)', t.back, '#93c5fd', t.backCount + ' payment(s) — old dues recovered') +
+        tile('openFeeKindList(\'adv\')', '⏩ Advance taken this month (coming months)', t.adv, '#c4b5fd', t.advCount + ' payment(s)') +
+        tile('openFeeKindList(\'due\')', '🔴 Still due — up to ' + MONTH_FULL[now.getMonth()] + ' (session ' + sessionLabel(ses) + ')', od.total, '#f87171', od.n + ' student(s) • ' + od.months + ' month-fee(s)') +
+      '</div>';
+    })() +
     '<div class="grid-3" style="margin-bottom:12px;">' +
       '<div class="stat-mini" style="cursor:pointer;" onclick="openAdvanceList()"><div class="sm-l">⏩ Advance held for coming months (' + Object.keys(t.advStus).length + ' students) — tap for the list</div><div class="sm-v" style="color:#c4b5fd;">' + fmtINR(Math.round(t.advHeld)) + '</div></div>' +
       '<div class="stat-mini"><div class="sm-l">📅 Session ' + sessionLabel(ses) + ' — collected so far</div><div class="sm-v">' + fmtINR(Math.round(t.session)) + '</div></div>' +
@@ -10437,6 +10445,64 @@ function openStudentPaymentsModal(stuId) {
   document.getElementById('row-editor-modal').classList.remove('hidden');
 }
 
+// 🔴 what is STILL DUE now: every active student, every month of this session from admission up to this month
+// that is not paid (a part payment counts what is left). Paying an old month later clears it here by itself.
+function feeOutstanding() {
+  var cur = localDateStr(new Date()).slice(0, 7), yms = sessionYms(sessionOf()).filter(function(m) { return m <= cur; });
+  var out = { total: 0, n: 0, months: 0, rows: [] };
+  // every payment read ONCE, grouped by student → month: what came in, and whether a balance was left
+  var byStu = {};
+  validFees().forEach(function(f) {
+    var yms2 = feeYms(f), each = yms2.length ? Number(f.amountPaid || 0) / yms2.length : 0;
+    var m0 = byStu[f.studentId] || (byStu[f.studentId] = {});
+    yms2.forEach(function(m) { var x = m0[m] || (m0[m] = { got: 0, bal: false }); x.got += each; if (Number(f.dueBalance) > 0) x.bal = true; });
+  });
+  DB.get(K.U).filter(isActiveStu).forEach(function(u) {
+    var fee = Number(u.monthlyFee || 0);
+    if (!(fee > 0)) return;
+    var adm = String(u.admissionDate || '').slice(0, 7), owe = [], amt = 0, mine = byStu[u.id] || {};
+    yms.forEach(function(m) {
+      if (/^\d{4}-\d{2}$/.test(adm) && m < adm) return;          // not admitted yet that month
+      var x = mine[m];
+      var left = x && !x.bal ? 0 : Math.max(0, fee - (x ? x.got : 0));   // paid → nothing left; part → the rest
+      if (left > 0) { owe.push(m); amt += left; }
+    });
+    if (owe.length) { out.rows.push({ u: u, months: owe, amt: amt }); out.total += amt; out.n++; out.months += owe.length; }
+  });
+  out.rows.sort(function(a, b) { return b.amt - a.amt; });
+  return out;
+}
+// the list behind each money tile: run (this month's own fee) • back (old dues cleared this month) • adv • due
+function openFeeKindList(kind) {
+  var cur = localDateStr(new Date()).slice(0, 7), rows = [], total = 0, title = '';
+  var nameOf = function(id) { var u = DB.get(K.U).find(function(x) { return x.id === id; }) || { fullName: id }; return '<b>' + esc(u.fullName || id) + '</b><br><span style="font-size:0.72rem; color:var(--text-muted);">' + esc(u.studentClass || u.batch || '') + '</span>'; };
+  if (kind === 'due') {
+    var od = feeOutstanding();
+    title = '🔴 Still due — session ' + sessionLabel(sessionOf()) + ', up to ' + MONTH_FULL[new Date().getMonth()];
+    total = od.total;
+    rows = od.rows.map(function(r) {
+      return '<tr><td>' + nameOf(r.u.id) + '</td><td>' + r.months.map(ymShort).join(', ') + '</td><td style="text-align:right;"><b>' + fmtINR(Math.round(r.amt)) + '</b><br><button type="button" class="btn btn-green btn-xs" onclick="openFeeCollectionModal(\'' + escA(r.u.id) + '\', \'' + r.months[0] + '\')">💳 Take fee</button></td></tr>';
+    });
+  } else {
+    title = kind === 'run' ? '🟢 Running — ' + MONTH_FULL[new Date().getMonth()] + '\'s own fee received' : (kind === 'back' ? '↩ Old dues cleared this month' : '⏩ Advance taken this month');
+    validFees().forEach(function(f) {
+      if (String(f.paymentDate || '').slice(0, 7) !== cur) return;
+      var yms = feeYms(f), each = yms.length ? Number(f.amountPaid || 0) / yms.length : 0;
+      var pick = yms.filter(function(m) { return kind === 'run' ? m === cur : (kind === 'back' ? m < cur : m > cur); });
+      if (!pick.length) return;
+      total += each * pick.length;
+      rows.push('<tr><td>' + nameOf(f.studentId) + '</td><td>' + pick.map(ymShort).join(', ') + '<br><span style="font-size:0.72rem; color:var(--text-muted);">paid ' + fmtDateShort(f.paymentDate) + ' • ' + (feeIsOffline(f) ? '💵 Offline' : '🌐 Online') + '</span></td><td style="text-align:right;"><b>' + fmtINR(Math.round(each * pick.length)) + '</b></td></tr>');
+    });
+  }
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h3 style="margin:0;">' + title + '</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
+    (rows.length
+      ? '<p style="margin:0 0 8px 0; font-size:0.86rem;">Total: <b style="color:#fcd34d;">' + fmtINR(Math.round(total)) + '</b> • ' + rows.length + ' row(s)</p>' +
+        (kind === 'due' ? '<p style="margin:0 0 8px 0; font-size:0.78rem; color:var(--text-muted);">When a student pays an old month, record it for THAT month (💳 Take fee → tick the old month) — it disappears from here and shows under “↩ Dues cleared”.</p>' : '') +
+        '<div class="qb-table-wrap"><table class="qb-table"><thead><tr><th>Student</th><th>Months</th><th style="text-align:right;">Amount</th></tr></thead><tbody>' + rows.join('') + '</tbody></table></div>'
+      : '<p style="color:var(--text-muted);">Nothing here.</p>');
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+}
 // ⏩ who has paid ahead: the student, the coming months already paid, the amount
 function openAdvanceList() {
   var cur = localDateStr(new Date()).slice(0, 7), by = {};

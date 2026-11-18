@@ -3087,7 +3087,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118204211';
+var APP_BUILD = '20261118205252';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -10075,7 +10075,7 @@ function openStudentPaymentsModal(stuId) {
       '<div style="font-size:0.76rem; color:var(--text-muted); margin:3px 0 8px 0;">' + esc(f.receiptNo || '') + ' • ' + fmtDateShort(f.paymentDate) + ' • ' + esc(f.paymentMode || '') + (f.reference ? ' • ' + esc(f.reference) : '') + '</div>' +
       '<div style="display:flex; gap:6px; flex-wrap:wrap;">' +
         '<button type="button" class="btn btn-amber btn-xs" onclick="openReceiptModal(\'' + escA(f.id) + '\')">🧾 Receipt</button>' +
-        '<button type="button" class="btn btn-purple btn-xs" onclick="openFeeMonthsEdit(\'' + escA(f.id) + '\')">📅 Change months</button>' +
+        '<button type="button" class="btn btn-purple btn-xs" onclick="openFeeMonthsEdit(\'' + escA(f.id) + '\')">✏️ Edit</button>' +
         '<a class="btn btn-green btn-xs" style="color:#fff;" target="_blank" rel="noopener" href="' + escA(whatsappFeeLink(f, u.whatsapp || u.id)) + '">💬 WhatsApp</a>' +
         '<button type="button" id="del-fee-' + escA(f.id) + '" class="btn btn-red btn-xs" onclick="deleteFeeRecord(\'' + escA(f.id) + '\', \'' + escA(stuId) + '\')">🗑️ Delete</button>' +
       '</div></div>';
@@ -10117,7 +10117,16 @@ function openAdvanceList() {
   document.getElementById('row-editor-modal').classList.remove('hidden');
 }
 // 📅 a payment saved under the wrong months / year (e.g. Jan–Feb that belong to the NEXT year): put it right
+// (what was typed is kept when the session is switched)
+var feeEditDraft = null;
+function feeEditKeep() {
+  var g = function(id) { return (document.getElementById(id) || {}).value; };
+  var m = document.querySelector('[onclick^="saveFeeMonthsEdit"]');
+  var id = m ? (m.getAttribute('onclick').match(/'([^']+)'/) || [])[1] : '';
+  feeEditDraft = { id: id, amt: g('fe-amt'), date: g('fe-date'), mode: g('fe-mode'), ref: g('fe-ref') };
+}
 function openFeeMonthsEdit(feeId, ses) {
+  if (ses === undefined) feeEditDraft = null;          // a fresh start (not a session switch)
   var f = DB.get(K.FEES).find(function(x) { return x.id === feeId; });
   if (!f) return;
   var cur = feeYms(f);
@@ -10128,11 +10137,22 @@ function openFeeMonthsEdit(feeId, ses) {
     return '<label class="col-pill" style="cursor:pointer;"><input type="checkbox" class="fme-chk" value="' + ym + '"' + (cur.indexOf(ym) !== -1 ? ' checked' : '') + '> ' + ymShort(ym) + '</label>';
   }).join('');
   document.getElementById('row-editor-body').innerHTML =
-    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h3 style="margin:0;">📅 Change the months of this payment</h3><button type="button" onclick="openStudentPaymentsModal(\'' + escA(f.studentId) + '\')" class="btn btn-slate btn-sm">◀ Back</button></div>' +
-    '<p style="margin:0 0 8px 0; font-size:0.84rem;">' + esc(studentOfFee(f).fullName || '') + ' • ' + fmtINR(f.amountPaid) + ' • paid on ' + fmtDateShort(f.paymentDate) + '<br>Now saved for: <b style="color:#fcd34d;">' + esc(monthsLabel(f)) + '</b></p>' +
-    '<div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;"><span style="font-size:0.8rem; color:var(--text-muted);">Session</span><select class="select" style="max-width:130px; margin:0;" onchange="openFeeMonthsEdit(\'' + escA(feeId) + '\', Number(this.value))">' + opts + '</select></div>' +
-    '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px;">' + chks + '</div>' +
-    '<div style="display:flex; justify-content:flex-end;"><button type="button" class="btn btn-green" onclick="saveFeeMonthsEdit(\'' + escA(feeId) + '\', ' + Number(ses) + ')">✓ Save months</button></div>';
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"><h3 style="margin:0;">✏️ Edit payment — ' + esc(studentOfFee(f).fullName || '') + '</h3><button type="button" onclick="openStudentPaymentsModal(\'' + escA(f.studentId) + '\')" class="btn btn-slate btn-sm">◀ Back</button></div>' +
+    '<p style="margin:0 0 8px 0; font-size:0.84rem;">Receipt <b>' + esc(f.receiptNo || '') + '</b> • now saved for: <b style="color:#fcd34d;">' + esc(monthsLabel(f)) + '</b> • ' + fmtINR(f.amountPaid) + '</p>' +
+    '<div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;"><span style="font-size:0.8rem; color:var(--text-muted);">Session</span><select class="select" style="max-width:130px; margin:0;" onchange="feeEditKeep(); openFeeMonthsEdit(\'' + escA(feeId) + '\', Number(this.value))">' + opts + '</select><span style="font-size:0.76rem; color:var(--text-muted);">tick the months this money is FOR</span></div>' +
+    '<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">' + chks + '</div>' +
+    (function() {
+      var k = feeEditDraft && feeEditDraft.id === feeId ? feeEditDraft : { amt: f.amountPaid, date: f.paymentDate, mode: f.paymentMode, ref: f.reference };
+      var online = !/off|cash/i.test(String(k.mode || ''));
+      return '<div class="grid-2">' +
+        '<div><label class="label">Amount received (₹)</label><input type="number" id="fe-amt" class="input" value="' + escA(String(k.amt || '')) + '"></div>' +
+        '<div><label class="label">Date received</label><input type="date" id="fe-date" class="input" value="' + escA(String(k.date || '').slice(0, 10)) + '"></div>' +
+        '<div><label class="label">Mode</label><select id="fe-mode" class="select"><option value="Online"' + (online ? ' selected' : '') + '>Online</option><option value="Offline"' + (online ? '' : ' selected') + '>Offline</option></select></div>' +
+        '<div><label class="label">Reference no. (optional)</label><input type="text" id="fe-ref" class="input" value="' + escA(String(k.ref || '')) + '"></div>' +
+      '</div>';
+    })() +
+    '<div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;"><button type="button" class="btn btn-green" onclick="saveFeeMonthsEdit(\'' + escA(feeId) + '\', ' + Number(ses) + ')">✓ Save changes</button></div>' +
+    '<p style="font-size:0.74rem; color:var(--text-muted); margin:8px 0 0 0;">The receipt number stays the same; the student sees the corrected receipt in the app.</p>';
   document.getElementById('row-editor-modal').classList.remove('hidden');
 }
 function saveFeeMonthsEdit(feeId, ses) {
@@ -10140,13 +10160,22 @@ function saveFeeMonthsEdit(feeId, ses) {
   document.querySelectorAll('.fme-chk:checked').forEach(function(c) { yms.push(c.value); });
   if (!yms.length) { showToast('Tick at least one month.', 'error'); return; }
   yms.sort();
+  var amt = Number((document.getElementById('fe-amt') || {}).value || 0);
+  var date = (document.getElementById('fe-date') || {}).value || '';
+  if (!(amt > 0)) { showToast('Enter the amount received.', 'error'); return; }
+  if (!date) { showToast('Choose the date the money was received.', 'error'); return; }
   var fees = DB.get(K.FEES), f = fees.find(function(x) { return x.id === feeId; });
   if (!f) return;
   f.ym = yms; f.session = Number(ses); f.year = yms[0].slice(0, 4); f.months = yms.map(function(m) { return m.slice(5, 7); });
+  f.amountPaid = amt; f.paymentDate = date;
+  f.paymentMode = (document.getElementById('fe-mode') || {}).value || f.paymentMode;
+  f.reference = String((document.getElementById('fe-ref') || {}).value || '').trim();
+  f.editedAt = Date.now();
+  feeEditDraft = null;
   DB.set(K.FEES, fees);
   updateFeeCorner();
   rerenderMoney();
-  showToast('📅 Saved for ' + monthsLabel(f) + '.', 'success');
+  showToast('✏️ Payment corrected: ' + monthsLabel(f) + ' • ' + fmtINR(amt) + '.', 'success');
   openStudentPaymentsModal(f.studentId);
 }
 function deleteFeeRecord(feeId, stuId) {
@@ -10305,6 +10334,7 @@ function openReceiptModal(feeId) {
       '<div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:14px;">' +
         '<button type="button" class="btn btn-green" onclick="downloadReceipt()">⬇ Download Receipt</button>' +
         (canShare ? '<button type="button" class="btn btn-slate" onclick="shareReceipt()">📤 Share</button>' : '') +
+        (cloud.role === 'admin' ? '<button type="button" class="btn btn-amber" onclick="openFeeMonthsEdit(\'' + escA(fee.id) + '\')">✏️ Edit payment</button>' : '') +
       '</div>';
   });
 }

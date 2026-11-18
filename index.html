@@ -1307,6 +1307,14 @@
         <h2>Student Login</h2>
       </div>
       <div class="stu-login-body">
+      <!-- ⚠️ the rules, in big letters, before every student login -->
+      <div style="border:3px solid #dc2626; background:#fef2f2; color:#7f1d1d; border-radius:14px; padding:12px 14px; margin:0 0 14px 0;">
+        <div style="text-align:center; font-size:1.25rem; font-weight:900; color:#b91c1c; letter-spacing:0.5px; margin-bottom:8px;">⚠️ IMPORTANT NOTICE ⚠️</div>
+        <div style="font-size:1.05rem; font-weight:900; line-height:1.45; margin-bottom:8px;">1️⃣ If you do not submit your <u>HOMEWORK / ASSESSMENT</u> on time, your <span style="color:#dc2626;">LOGIN WILL BE LOCKED</span>.
+          <div style="font-size:0.98rem; font-weight:800; margin-top:3px;">সময়মতো হোমওয়ার্ক / অ্যাসেসমেন্ট জমা না দিলে তোমার লগইন বন্ধ হয়ে যাবে।</div></div>
+        <div style="font-size:1.05rem; font-weight:900; line-height:1.45;">2️⃣ If you MISS the <u>ONLINE EXAMS</u>, your <span style="color:#dc2626;">PORTAL WILL BE BLOCKED</span>.
+          <div style="font-size:0.98rem; font-weight:800; margin-top:3px;">অনলাইন পরীক্ষা মিস করলে তোমার পোর্টাল ব্লক হয়ে যাবে।</div></div>
+      </div>
       <p style="color:var(--text-muted); font-size:0.78rem; margin:0 0 12px 0; text-align:center;">User ID: your registered WhatsApp number • Password: the one your teacher gave you</p>
 
       <label class="label">WhatsApp Number (User ID)</label>
@@ -3087,7 +3095,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118211005';
+var APP_BUILD = '20261118212807';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -13509,8 +13517,11 @@ function stuGate() {
   if (ids.length) {
     var names = ids.map(function(id) { var t = hwCache.find(function(x) { return x.id === id; }); return t ? t.title : ''; }).filter(Boolean);
     return { tab: 'hw', ids: ids, msg: '🔒 Your portal is locked — submit your pending homework / assignment first.',
-      html: '<div class="card blink-live" style="border:2px solid #dc2626; background:rgba(220,38,38,0.14); color:#fecaca;">' +
-        '<div style="font-size:1.05rem; font-weight:900;">🔒 Your portal is locked — submit your homework / assignment first</div>' +
+      html: '<div class="card blink-live" style="border:3px solid #dc2626; background:rgba(220,38,38,0.16); color:#fecaca;">' +
+        '<div style="font-size:1.35rem; font-weight:900; color:#fff; line-height:1.35;">🔒 YOUR PORTAL IS LOCKED</div>' +
+        '<div style="font-size:1.15rem; font-weight:900; color:#fde68a; margin-top:6px; line-height:1.4;">SUBMIT YOUR HOMEWORK COPY FIRST — then you can use your portal again.</div>' +
+        '<div style="font-size:1.08rem; font-weight:800; color:#fde68a; margin-top:4px; line-height:1.4;">আগে হোমওয়ার্ক কপি সাবমিট করো, তারপর তুমি তোমার পোর্টাল ব্যবহার করতে পারবে।</div>' +
+        '<div style="margin-top:8px; font-size:0.9rem;">👇 Download the question below, write it in your copy, then press <b>📤 Upload</b>.</div>' +
         '<div style="margin-top:6px; font-size:0.9rem;">You did not submit: <b>' + names.map(esc).join(', ') + '</b>. Upload ' + (ids.length > 1 ? 'them' : 'it') + ' below (the upload is open for you even after the closing time).</div>' +
         '<div style="margin-top:6px; font-size:0.86rem; color:#fde68a;">' + (byTeacher
           ? '✅ After you submit, your teacher checks it and opens your student login again.'
@@ -13600,6 +13611,18 @@ function missLockScreen(reasonHtml) {
     '<p style="color:#fcd34d; font-size:0.9rem; margin:0 0 16px 0;">Please meet your teacher. Only your teacher can open it again.</p>' +
     '<button type="button" class="btn btn-slate" onclick="logoutNow()">⎋ Logout</button></div>';
 }
+// ⏰ the lock works by itself also while the student stays logged in: every minute (and each time the app comes
+// back on screen) the closing times are checked again — the moment a homework's time is over without a
+// submission, the portal closes and only the Homework page opens. The homework list is fetched again every 10 minutes.
+var stuLockTick = 0;
+setInterval(function() {
+  if (cloud.role !== 'student' || !currentUser || examState || document.hidden) return;
+  stuLockTick++;
+  if (!hwCache || stuLockTick % 10 === 0) loadHw(true); else checkStudentMissLock();
+}, 60000);
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible' && cloud.role === 'student' && currentUser && !examState) setTimeout(function() { if (hwCache) checkStudentMissLock(); else loadHw(true); }, 800);
+});
 function checkStudentMissLock() {
   if (cloud.role !== 'student' || !currentUser || examState) return;
   // missed tests: full lock (only the teacher opens it). Homework / fees: the gate opens only that page.
@@ -13607,7 +13630,12 @@ function checkStudentMissLock() {
   var s = studentMissState();
   if (s && s.tests >= s.n) { missLockScreen('You did not take ' + s.n + ' online tests in a row.'); return; }
   var g = stuGate();
-  if (g && studentTab !== g.tab) { studentTab = g.tab; renderStudentDashContent(); }
+  // the portal closes at once (also when the student is already on that page but without the lock notice yet)
+  if (g && (studentTab !== g.tab || (typeof stuLastHtml === 'string' && stuLastHtml.indexOf(g.html.slice(0, 120)) === -1))) {
+    if (studentTab !== g.tab) showToast(g.msg, 'error');
+    studentTab = g.tab; renderStudentDashContent();
+    window.scrollTo(0, 0);
+  }
 }
 // the warning on the student's home page (one miss before the lock)
 function missWarnHtml() {

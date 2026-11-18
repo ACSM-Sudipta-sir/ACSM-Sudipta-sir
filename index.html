@@ -1379,7 +1379,7 @@
           <div class="set-group">🎓 Students</div>
           <button type="button" onclick="openMissRuleSetting()" class="btn btn-slate">🔒 Lock &amp; grade setting</button>
           <button type="button" onclick="openQuickOpenSetting()" class="btn btn-slate">⚡ Quick open setting</button>
-          <button type="button" onclick="askNotifyPermission()" class="btn btn-slate">🔔 Phone notifications</button>
+          <button type="button" onclick="openPushSetup()" class="btn btn-slate">🔔 Phone notifications</button>
           <div class="set-group">🎨 Look &amp; wishes</div>
           <button type="button" onclick="openLogoPicker()" class="btn btn-slate">🖼️ Change Logo</button>
           <button type="button" onclick="openWishSetting()" class="btn btn-slate">🎉 Special-day wishes</button>
@@ -1978,6 +1978,7 @@ function sysNotify(title, body, tag, tab) {
   try {
     if (!notifySupported() || Notification.permission !== 'granted') return;
     if (!document.hidden && document.hasFocus && document.hasFocus()) return;     // on screen already: the toast is enough
+    if (pushOnHere() && pushReady() && /^(notices|tests|hw)$/.test(tab || '')) return;        // the notification comes from the sender script already (no double)
     navigator.serviceWorker.ready.then(function(reg) {
       reg.showNotification(title, { body: body || '', icon: 'icons/icon-192.png?v=3', badge: 'icons/favicon-64.png?v=3', tag: tag || 'acsm', renotify: true, vibrate: [200, 100, 200], data: { tab: tab || '' } });
     }).catch(function() {});
@@ -1991,11 +1992,223 @@ function askNotifyPermission() {
   Notification.requestPermission().then(function(p) {
     if (p === 'granted') {
       showToast('🔔 Notifications are ON.', 'success');
+      pushRegister(true);
       navigator.serviceWorker.ready.then(function(reg) { reg.showNotification('🔔 ACSM- Sudipta Sir', { body: 'Notifications are on — new notices, exams and messages will show here.', icon: 'icons/icon-192.png?v=3', tag: 'acsm-test' }); }).catch(function() {});
     } else showToast('Notifications are blocked. To allow them: phone Settings → Apps → (your browser / ACSM app) → Notifications → Allow.', 'error');
     if (cloud.role === 'student') renderStudentDashContent();
   });
 }
+// ================= 🔔 PUSH: notifications that come even when the app is CLOSED =================
+// Free: Firebase Cloud Messaging + the teacher's own Google Apps Script ("ACSM Push") as the sender.
+// settings/config → push: { url (the script's Web app URL), vapid (the Web Push key from Firebase) }
+// The script keeps every student phone's "address" (token) and sends to the students the teacher's portal names.
+function pushCfg() { return cloud.pushCfg || {}; }
+function pushReady() { var c = pushCfg(); return !!(c.url && c.vapid); }
+function pushOnHere() { try { return !!localStorage.getItem('acsm_push_' + (currentUser ? currentUser.id : '')); } catch (e) { return false; } }
+var pushRegBusy = false;
+// the student's phone tells the script its address (again every 7 days, or when it changed)
+async function pushRegister(force) {
+  if (cloud.role !== 'student' || !currentUser || !pushReady() || pushRegBusy) return;
+  if (!notifySupported() || Notification.permission !== 'granted' || !window.FBAPI || !FBAPI.pushToken) return;
+  pushRegBusy = true;
+  try {
+    var c = pushCfg(), tok = await FBAPI.pushToken(c.vapid);
+    if (!tok) return;
+    var key = 'acsm_push_' + currentUser.id, sig = tok + '|' + c.url, old = {};
+    try { old = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { old = {}; }
+    if (!force && old.sig === sig && Date.now() - Number(old.at || 0) < 7 * 86400000) return;
+    await driveCall({ url: c.url }, { action: 'register', token: tok, sid: currentUser.id, name: currentUser.fullName || '' });
+    try { localStorage.setItem(key, JSON.stringify({ sig: sig, at: Date.now() })); } catch (e) {}
+  } catch (e) { /* no internet / not supported: tried again next time */ }
+  finally { pushRegBusy = false; }
+}
+// 👩‍🏫 the teacher's portal sends (at = a later time: the script sends it then by itself)
+async function pushSend(ids, title, body, tab, tag, at) {
+  if (cloud.role !== 'admin' || !pushReady() || !driveKey() || !ids || !ids.length) return null;
+  try {
+    return await driveCall({ url: pushCfg().url }, { action: at ? 'schedule' : 'notify', key: driveKey(), ids: ids, title: title, body: String(body || '').slice(0, 240), tab: tab || '', tag: tag || 'acsm', at: at || 0, id: tag || '' });
+  } catch (e) { return null; }
+}
+function pushIds(fn) { return DB.get(K.U).filter(isActiveStu).filter(fn).map(function(u) { return u.id; }); }
+function pushNotice(n) {
+  var ids = pushIds(function(u) { return (!n.board || n.board === 'ALL' || boardGroup(u.board) === n.board) && (!n.target || n.target === 'ALL' || n.target === (u.studentClass || u.batch || '')); });
+  pushSend(ids, '📢 ' + (n.title || 'New notice'), plainText(n.body || '').slice(0, 200) || 'Open the app to read it.', 'notices', 'n_' + n.id);
+}
+function pushExam(t, isNew) {
+  var ids = pushIds(function(u) { return sdAssignedTests(u, u.studentClass || u.batch || 'Class 12').some(function(x) { return x.id === t.id; }); });
+  if (!ids.length) return;
+  if (isNew) pushSend(ids, '📝 New exam: ' + (t.title || ''), t.startAtMs && t.startAtMs > Date.now() ? 'Opens ' + fmtDateTime(t.startAtMs) + ' — be ready!' : 'It is open now — take it in the app.', 'tests', 'tn_' + t.id);
+  // 🔴 at the opening time the script sends "LIVE now" by itself (also when the teacher's portal is closed)
+  if (t.startAtMs && t.startAtMs > Date.now() + 60000) pushSend(ids, '🔴 Exam LIVE now: ' + (t.title || ''), 'Open the app and start' + (t.endAtMs ? ' — it closes ' + fmtDateTime(t.endAtMs) : '') + '.', 'tests', 'tl_' + t.id, t.startAtMs);
+}
+function pushHw(task, isNew) {
+  if (!isNew) return;
+  var ids = pushIds(function(u) { return hwIsForStudent(task, u); });
+  var k = HW_KINDS[hwKind(task)] || { title: 'Homework' };
+  pushSend(ids, '📒 New ' + k.title + ': ' + (task.title || ''), task.dueAtMs ? 'Submit by ' + fmtDateTime(task.dueAtMs) + ' — or your login gets locked.' : 'Open the app to see it.', 'hw', 'h_' + task.id);
+}
+
+// ⚙️ the teacher's set-up page (Settings → 🔔 Phone notifications)
+var PUSH_SCRIPT = String.raw`// =====================================================================
+//  ACSM Portal — PHONE NOTIFICATIONS (free)   paste this in script.google.com
+//  Use the SAME Google account that owns the Firebase project "acsm-math-portal".
+//  DO NOT CHANGE ANYTHING — your secret key is already written below by the portal.
+// =====================================================================
+const ADMIN_KEY = '__KEY__';
+const PROJECT_ID = 'acsm-math-portal';
+
+function doPost(e) {
+  try {
+    const r = JSON.parse(e.postData.contents);
+    if (r.action === 'register') return out(register(r));
+    if (r.action === 'ping') return out({ ok: true, app: 'ACSM Push', version: 1, keyOk: r.key === ADMIN_KEY, phones: r.key === ADMIN_KEY ? tokens().length : null });
+    if (r.key !== ADMIN_KEY) return out({ ok: false, error: 'not allowed' });
+    if (r.action === 'notify') return out(send(r));
+    if (r.action === 'schedule') return out(schedule(r));
+    return out({ ok: false, error: 'unknown action' });
+  } catch (err) {
+    return out({ ok: false, error: String(err) });
+  }
+}
+function doGet() { return out({ ok: true, app: 'ACSM Push' }); }
+function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+function P() { return PropertiesService.getScriptProperties(); }
+function hash(s) { return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_1, s)).slice(0, 22); }
+
+// a student's phone address
+function register(r) {
+  const t = String(r.token || '');
+  if (t.length < 20 || t.length > 1000) return { ok: false, error: 'bad token' };
+  const sid = String(r.sid || '').replace(/\D/g, '').slice(0, 15);
+  P().setProperty('t_' + hash(t), JSON.stringify({ t: t, s: sid, n: String(r.name || '').slice(0, 40), at: Date.now() }));
+  return { ok: true };
+}
+function tokens() {
+  const all = P().getProperties();
+  return Object.keys(all).filter(function (k) { return k.indexOf('t_') === 0; }).map(function (k) {
+    try { const o = JSON.parse(all[k]); o.k = k; return o; } catch (e) { return null; }
+  }).filter(Boolean);
+}
+
+// send to the students the portal names (ids) — or to everybody (all)
+function send(r) {
+  const ids = (r.ids || []).map(String);
+  const list = tokens().filter(function (o) { return r.all || ids.indexOf(o.s) !== -1; });
+  const auth = 'Bearer ' + ScriptApp.getOAuthToken();
+  const url = 'https://fcm.googleapis.com/v1/projects/' + PROJECT_ID + '/messages:send';
+  let sent = 0, removed = 0, failed = 0, lastErr = '';
+  for (let i = 0; i < list.length; i += 50) {
+    const part = list.slice(i, i + 50);
+    const reqs = part.map(function (o) {
+      return { url: url, method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        headers: { Authorization: auth, 'X-Goog-User-Project': PROJECT_ID },
+        payload: JSON.stringify({ message: { token: o.t,
+          data: { title: String(r.title || 'ACSM- Sudipta Sir').slice(0, 100), body: String(r.body || '').slice(0, 240), tab: String(r.tab || ''), tag: String(r.tag || 'acsm') },
+          webpush: { headers: { Urgency: 'high', TTL: '86400' } } } }) };
+    });
+    UrlFetchApp.fetchAll(reqs).forEach(function (x, j) {
+      const c = x.getResponseCode();
+      if (c === 200) { sent++; return; }
+      const b = x.getContentText();
+      if (c === 404 || /UNREGISTERED/.test(b)) { P().deleteProperty(part[j].k); removed++; }   // the app was removed from that phone
+      else { failed++; lastErr = b.slice(0, 300); }
+    });
+  }
+  return { ok: true, sent: sent, removed: removed, failed: failed, error: lastErr };
+}
+
+// "Exam LIVE now" at the opening time: kept here, sent by the clock below
+function schedule(r) {
+  const id = String(r.id || ('s' + Date.now())).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 60);
+  P().setProperty('s_' + id, JSON.stringify({ at: Number(r.at) || 0, ids: r.ids || [], title: r.title, body: r.body, tab: r.tab, tag: r.tag }));
+  ensureClock();
+  return { ok: true };
+}
+function tick() {
+  const all = P().getProperties(), now = Date.now();
+  Object.keys(all).forEach(function (k) {
+    if (k.indexOf('s_') !== 0) return;
+    let o = null;
+    try { o = JSON.parse(all[k]); } catch (e) { P().deleteProperty(k); return; }
+    if (o.at <= now + 60000) {
+      P().deleteProperty(k);
+      if (now - o.at < 3 * 3600000) send(o);            // (a very old one is dropped)
+    }
+  });
+}
+function ensureClock() {
+  if (!ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'tick'; })) {
+    ScriptApp.newTrigger('tick').timeBased().everyMinutes(1).create();
+  }
+}
+// ▶ Run this ONCE after pasting (it asks for the permissions)
+function setup() { ensureClock(); Logger.log('ACSM Push is ready.'); }
+`;
+var PUSH_MANIFEST = '{\n  "timeZone": "Asia/Kolkata",\n  "runtimeVersion": "V8",\n  "exceptionLogging": "STACKDRIVER",\n  "oauthScopes": [\n    "https://www.googleapis.com/auth/script.external_request",\n    "https://www.googleapis.com/auth/firebase.messaging",\n    "https://www.googleapis.com/auth/script.scriptapp"\n  ],\n  "webapp": { "executeAs": "USER_DEPLOYING", "access": "ANYONE_ANONYMOUS" }\n}\n';
+function pushEnsureKey() {
+  var k = driveKey();
+  if (!k) { k = 'acsm-' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36); Store.set(K.DRIVEKEY, k); }
+  return k;
+}
+function copyPushScript() { copyTextSafe(PUSH_SCRIPT.replace('__KEY__', pushEnsureKey()), '📋 Script copied — paste it in script.google.com (Code.gs).'); }
+function copyPushManifest() { copyTextSafe(PUSH_MANIFEST, '📋 appsscript.json copied.'); }
+function openPushSetup() {
+  if (!teacherOnly()) return;
+  pushEnsureKey();
+  var c = pushCfg();
+  var st = '<li>';
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h3 style="margin:0;">🔔 Phone notifications (app closed too)</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
+    '<div style="padding:8px 10px; border-radius:10px; margin-bottom:10px; ' + (pushReady() ? 'background:rgba(22,163,74,0.14); border:1px solid #16a34a; color:#bbf7d0;">✅ <b>Set up.</b> New notices, exams (and "LIVE now" at the opening time) and homework reach the students\' phones even when the app is closed.' : 'background:rgba(245,158,11,0.12); border:1px solid #f59e0b; color:#fde68a;">⚠️ <b>Not set up yet</b> — 3 steps, one time only (about 15 minutes).') + '</div>' +
+    '<details' + (c.vapid ? '' : ' open') + ' class="card" style="padding:10px; margin-bottom:8px;"><summary style="cursor:pointer; font-weight:800;">① Web Push key from Firebase</summary><ol style="margin:6px 0 8px 18px; padding:0; line-height:1.8; font-size:0.86rem;">' +
+      st + 'Press <b>🔗 Open Firebase</b> (your Firebase account).</li>' +
+      st + 'Scroll to <b>Web configuration</b> → <b>Web Push certificates</b> → press <b>Generate key pair</b>.</li>' +
+      st + 'A long key appears (starts with <b>B…</b>) → copy it → paste it below.</li></ol>' +
+      '<a class="btn btn-slate btn-sm" style="color:#fff;" target="_blank" rel="noopener" href="https://console.firebase.google.com/project/acsm-math-portal/settings/cloudmessaging">🔗 Open Firebase</a>' +
+      '<label class="label">Web Push key</label><input id="push-vapid" class="input" placeholder="B…" value="' + escA(c.vapid || '') + '"></details>' +
+    '<details' + (c.url ? '' : ' open') + ' class="card" style="padding:10px; margin-bottom:8px;"><summary style="cursor:pointer; font-weight:800;">② The sender script (Google Apps Script)</summary><ol style="margin:6px 0 8px 18px; padding:0; line-height:1.8; font-size:0.86rem;">' +
+      st + 'Press <b>🔗 Open Apps Script</b> → <b>New project</b> → name it <b>ACSM Push</b>.</li>' +
+      st + 'Press <b>📋 Copy script</b> → in the code box: <b>Ctrl+A</b> → <b>Delete</b> → <b>Ctrl+V</b> → <b>💾 Save</b>.</li>' +
+      st + 'Left side <b>⚙️ Project Settings</b> → tick <b>Show "appsscript.json" manifest file</b> → back to <b>&lt;&gt; Editor</b> → open <b>appsscript.json</b> → <b>Ctrl+A</b> → press <b>📋 Copy appsscript.json</b> → <b>Ctrl+V</b> → <b>💾 Save</b>.</li>' +
+      st + 'Open <b>Code.gs</b> again → in the list next to <b>▶ Run</b> choose <b>setup</b> → <b>▶ Run</b> → <b>Review permissions</b> → your account → <b>Advanced</b> → <b>Go to ACSM Push</b> → <b>Allow</b>.</li>' +
+      st + '<b>Deploy</b> → <b>New deployment</b> → ⚙️ <b>Web app</b> → Execute as: <b>Me</b> • Who has access: <b>Anyone</b> → <b>Deploy</b> → copy the <b>Web app URL</b> (ends with /exec) → paste it below.</li></ol>' +
+      '<div style="display:flex; gap:6px; flex-wrap:wrap;"><a class="btn btn-slate btn-sm" style="color:#fff;" target="_blank" rel="noopener" href="https://script.google.com/home">🔗 Open Apps Script</a><button type="button" class="btn btn-teal btn-sm" onclick="copyPushScript()">📋 Copy script</button><button type="button" class="btn btn-teal btn-sm" onclick="copyPushManifest()">📋 Copy appsscript.json</button></div>' +
+      '<label class="label">Web app URL</label><input id="push-url" class="input" placeholder="https://script.google.com/macros/s/…/exec" value="' + escA(c.url || '') + '"></details>' +
+    '<div class="card" style="padding:10px; margin-bottom:8px;"><b>③ Save &amp; test</b><div style="font-size:0.84rem; color:var(--text-muted); margin:4px 0 8px;">After saving, every student who has pressed <b>🔔 Turn on notifications</b> in the app is added by itself the next time they open it.</div>' +
+      '<div style="display:flex; gap:6px; flex-wrap:wrap;"><button type="button" class="btn btn-green btn-sm" onclick="savePushSetup()">💾 Save</button><button type="button" class="btn btn-blue btn-sm" onclick="pushCheck()">🔌 Check (phones added)</button><button type="button" class="btn btn-amber btn-sm" onclick="pushTestAll()">📣 Send a test to all students</button></div>' +
+      '<div id="push-st" style="font-size:0.84rem; margin-top:8px;"></div></div>' +
+    '<div style="font-size:0.78rem; color:var(--text-muted);">📱 iPhone / iPad: works only when the student has installed the app (Share ⎙ → Add to Home Screen, iOS 16.4 or newer) and turned notifications on inside it. • This device: <button type="button" class="btn btn-slate btn-xs" onclick="askNotifyPermission()">🔔 Allow notifications here</button></div>';
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+}
+function savePushSetup() {
+  var vapid = String((document.getElementById('push-vapid') || {}).value || '').trim().replace(/\s+/g, '');
+  var url = String((document.getElementById('push-url') || {}).value || '').trim();
+  if (vapid && !/^B[A-Za-z0-9_-]{60,}$/.test(vapid)) { showToast('The Web Push key looks wrong — it is one long line starting with B.', 'error'); return; }
+  if (url && !/^https:\/\/script\.google(usercontent)?\.com\/.+\/exec$/.test(url)) { showToast('The Web app URL must start with https://script.google.com/ and end with /exec.', 'error'); return; }
+  cloud.pushCfg = { vapid: vapid, url: url };
+  FBAPI.saveSetting('config', { push: cloud.pushCfg });
+  showToast('💾 Saved.' + (vapid && url ? ' Press 🔌 Check.' : ''), 'success');
+  openPushSetup();
+}
+async function pushCheck() {
+  var el = document.getElementById('push-st');
+  if (!pushReady()) { el.innerHTML = '<span style="color:#fca5a5;">Fill in both boxes and press 💾 Save first.</span>'; return; }
+  el.textContent = '⏳ Checking…';
+  try {
+    var j = await driveCall({ url: pushCfg().url }, { action: 'ping', key: driveKey() });
+    el.innerHTML = j.keyOk ? '<span style="color:#86efac;">✅ The script answers. <b>' + (j.phones || 0) + '</b> student phone(s) added so far.</span>' : '<span style="color:#fca5a5;">The script answers, but the secret key does not match — press 📋 Copy script again, paste, Save, then Deploy → Manage deployments → ✏️ → New version → Deploy.</span>';
+  } catch (e) { el.innerHTML = '<span style="color:#fca5a5;">The script did not answer — check the Web app URL and that access is “Anyone”.</span>'; }
+}
+async function pushTestAll() {
+  var el = document.getElementById('push-st');
+  if (!pushReady()) { el.innerHTML = '<span style="color:#fca5a5;">Save the set-up first.</span>'; return; }
+  el.textContent = '⏳ Sending…';
+  try {
+    var j = await driveCall({ url: pushCfg().url }, { action: 'notify', key: driveKey(), all: true, ids: [], title: '🔔 ACSM- Sudipta Sir', body: 'Test: notifications are working.', tab: '', tag: 'acsm-test' });
+    el.innerHTML = '<span style="color:' + (j.failed ? '#fca5a5' : '#86efac') + ';">📣 Sent to <b>' + (j.sent || 0) + '</b> phone(s)' + (j.removed ? ' • ' + j.removed + ' old phone(s) removed' : '') + (j.failed ? ' • ' + j.failed + ' failed: ' + esc(String(j.error || '').slice(0, 160)) : '') + '</span>';
+  } catch (e) { el.innerHTML = '<span style="color:#fca5a5;">Could not send: ' + esc(String((e && e.message) || 'error')) + '</span>'; }
+}
+
 // the card on the student's home page while notifications are not switched on
 function notifyCardHtml() {
   if (!notifySupported() || Notification.permission === 'granted') return isIosDevice() && !notifySupported() && !isInstalledApp()
@@ -2063,6 +2276,8 @@ window.onCloudSetting = function(id, data, pending) {
     cloud.quickOpen = d.stuQuickOpen !== false;
     cloud.missCfg = d.missRule || null;     // 🔒 miss lock + 🏅 grade / redo rule
     cloud.wishCfg = d.wishes || null;       // 🎉 special-day wishes
+    cloud.pushCfg = d.push || null;         // 🔔 notifications while the app is closed
+    if (cloud.role === 'student') setTimeout(function() { pushRegister(false); }, 5000);
     try { localStorage.setItem(QUICK_KEY, cloud.quickOpen ? '1' : '0'); } catch (e) {}
   } else if (id === 'aikey') {
     Store.mem[K.AIKEY] = d.key ? String(d.key) : null;
@@ -3095,7 +3310,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118212807';
+var APP_BUILD = '20261118215316';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -5742,6 +5957,7 @@ async function postNotice() {
   var list = DB.get(K.ALERTS);
   list.unshift(n);
   DB.set(K.ALERTS, list);
+  pushNotice(n);              // 🔔 to the students' phones (also when their app is closed)
   renderAdminNoticesContent();
   showToast('Notice posted' + (n.pdf ? ' with the PDF' + (n.pdf.fileId ? ' (in your Google Drive)' : '') : '') + '! Students can see it now.', 'success');
 }
@@ -12447,6 +12663,7 @@ function saveExamFromBuilder() {
   if (idx !== -1) { testObj.createdAt = tests[idx].createdAt || testObj.createdAt; tests[idx] = testObj; }
   else tests.unshift(testObj);
   DB.set(K.T, tests);
+  pushExam(testObj, idx === -1);     // 🔔 "new exam" now + "LIVE now" at the opening time
   if (picked.length) qbSel = {};
   closeModal();
   switchAdminTab(isJeeFolder(testObj.targetBatch) ? 'jee-tests' : 'tests');
@@ -13921,6 +14138,7 @@ async function saveHwTask(id, kind) {
       await FBAPI.hwQuestionSave(task.id, data);
     }
     await FBAPI.hwTaskSave(task);
+    pushHw(task, !old);         // 🔔 new homework → the students' phones
     closeModal();
     showToast(HW_KINDS[kind].title + ' saved — ' + (task.onlyFor ? 'only ' + onlyNames(task.onlyFor).join(', ') + ' can see it.' : 'students of ' + (task.cls === 'ALL' ? 'all classes' : task.cls) + ' can see it now.'), 'success');
     hwCache = null;
@@ -17688,6 +17906,13 @@ window.FBAPI = {
   logout: function () { return signOut(auth); },
   watchGallery: watchGallery,
   pushCollection: pushCollection,
+  // 🔔 this phone's "address" for notifications that come even when the app is closed (Firebase Cloud Messaging)
+  pushToken: async function (vapidKey) {
+    const m = await import("https://www.gstatic.com/firebasejs/13.1.0/firebase-messaging.js");
+    if (!(await m.isSupported())) return "";
+    const reg = await navigator.serviceWorker.ready;
+    return await m.getToken(m.getMessaging(app), { vapidKey: vapidKey, serviceWorkerRegistration: reg });
+  },
   saveSetting: saveSetting,
   isLoaded: function (name) { return !!docs[name]; },
   // marksheets / documents: one document per file, read only when needed (admin only)

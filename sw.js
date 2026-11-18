@@ -2,7 +2,7 @@
 // The page is always taken fresh from the internet first, so every update reaches the students at once.
 // Only when there is no internet the last saved copy opens (the data itself still needs the internet).
 // Firebase / Google / other websites are never touched by this file.
-const CACHE = 'acsm-shell-v6';
+const CACHE = 'acsm-shell-v7';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', function (e) {
@@ -44,6 +44,23 @@ self.addEventListener('fetch', function (e) {
       clearTimeout(timer);
       saved().then(function (r) { if (r) give(r); else { done = true; resolve(Response.error()); } });
     });
+  }));
+});
+
+// 🔔 a notification sent while the app is CLOSED (Firebase Cloud Messaging → this phone): shown on the screen
+self.addEventListener('push', function (e) {
+  let j = {};
+  try { j = e.data ? e.data.json() : {}; } catch (err) { j = { data: { body: e.data ? e.data.text() : '' } }; }
+  const d = j.data || {}, n = j.notification || {};
+  const title = d.title || n.title || 'ACSM- Sudipta Sir';
+  e.waitUntil(self.registration.showNotification(title, {
+    body: d.body || n.body || '',
+    icon: 'icons/icon-192.png?v=3',
+    badge: 'icons/favicon-64.png?v=3',
+    tag: d.tag || 'acsm',
+    renotify: true,
+    vibrate: [200, 100, 200],
+    data: { tab: d.tab || '' }
   }));
 });
 

@@ -3411,7 +3411,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118232811';
+var APP_BUILD = '20261119000849';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -11137,6 +11137,102 @@ async function aiDupCheckPreview() {
   if (ta) inputQState.jsonText = ta.value;
   renderAdminInputQuestionContent();
 }
+// 🤖 AI ANSWER CHECK (import preview): the AI SOLVES every question itself and compares with the given key, options
+// and solution. Result per question in q._ai: { ok, k (the right option), ans, sol (solution ok?), q (question ok?), why }
+var aiKeyBusy = false;
+function aiKeyPrompt(items) {
+  return 'You are a very careful mathematics examiner checking an answer key before it goes to students.\n' +
+    'For EACH question below: solve it yourself completely and carefully (do not trust the given answer). Then compare.\n' +
+    'Reply with ONLY a JSON array, one object per question:\n' +
+    '[{"id":"q3","answer":"your own final answer, short","right":2,"keyOk":false,"solutionOk":true,"questionOk":true,"why":"short reason"}]\n' +
+    '- "right": index (0 = A, 1 = B, 2 = C, 3 = D) of the option that equals YOUR answer; -1 if no option is correct; null if the question has no options.\n' +
+    '- "keyOk": true only if "right" equals the given "marked" index.\n' +
+    '- "solutionOk": false if the given solution has a mistake or ends with a different value.\n' +
+    '- "questionOk": false if the question itself is wrong / incomplete / impossible / has two correct options (say which in "why").\n' +
+    '- "why": one short sentence (empty when everything is right).\n' +
+    'Maths in the questions is LaTeX. QUESTIONS:\n' + JSON.stringify(items);
+}
+async function aiKeyCheckPreview(auto) {
+  var list = inputQState.validatedPreview || [];
+  if (aiKeyBusy) return;
+  if (!getAiKey()) { if (!auto) showToast('No AI key — add your Gemini key first (🤖 AI settings).', 'error'); return; }
+  var items = [];
+  list.forEach(function(q, i) {
+    if (q._error || (q._dup && !q._force)) return;
+    items.push({ id: 'q' + i, question: plainText(q.text || '').slice(0, 1200), options: (q.options || []).map(function(o) { return plainText(o).slice(0, 200); }),
+      marked: q.options && q.options.length >= 2 ? Number(q.correct || 0) : null, solution: plainText(q.explanation || '').slice(0, 1500) });
+  });
+  if (!items.length) return;
+  aiKeyBusy = true;
+  var btn = document.getElementById('ai-key-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 Solving ' + items.length + ' question(s)…'; }
+  var done = 0, bad = 0;
+  var batch = async function(part) {
+    var res = parseAIReplyLenient(await callGeminiAI(aiKeyPrompt(part), 'You solve and check mathematics questions. Reply with JSON only.'));
+    (Array.isArray(res) ? res : []).forEach(function(r) {
+      var i = Number(String(r.id || '').replace(/\D/g, '')), q = list[i];
+      if (!q) return;
+      var right = r.right === null || r.right === undefined || r.right === '' ? null : Number(r.right);
+      var hasOpts = q.options && q.options.length >= 2;
+      var keyOk = !hasOpts || (right !== null && right === Number(q.correct || 0));
+      q._ai = { ok: keyOk && r.solutionOk !== false && r.questionOk !== false, k: hasOpts && right !== null && right >= 0 && right < q.options.length ? right : null,
+        none: hasOpts && right === -1, ans: String(r.answer || '').slice(0, 120), sol: r.solutionOk !== false, qok: r.questionOk !== false, why: String(r.why || '').slice(0, 200) };
+      done++;
+      if (!q._ai.ok) bad++;
+    });
+  };
+  try {
+    var parts = [];
+    for (var s = 0; s < items.length; s += 6) parts.push(items.slice(s, s + 6));
+    // two batches at a time
+    var next = 0;
+    var worker = async function() { while (next < parts.length) { var p = parts[next++]; try { await batch(p); } catch (e) {} if (btn) btn.textContent = '🤖 Checked ' + done + ' of ' + items.length + '…'; } };
+    await Promise.all([worker(), worker()]);
+    showToast(done ? (bad ? '🤖 AI check: ' + bad + ' of ' + done + ' question(s) need your attention (red boxes).' : '🤖 AI check: all ' + done + ' answers are right ✅') : 'The AI check could not run now — try again in a minute.', bad || !done ? 'error' : 'success');
+  } finally { aiKeyBusy = false; }
+  var ta = document.getElementById('inputq-json-textarea');
+  if (ta) inputQState.jsonText = ta.value;
+  renderAdminInputQuestionContent();
+}
+// the AI says another option is right → use it (one question, or all)
+function setPreviewCorrect(i, k) {
+  var q = (inputQState.validatedPreview || [])[i];
+  if (!q || !q.options || q.options[k] === undefined) return;
+  var ta = document.getElementById('inputq-json-textarea');
+  if (ta) inputQState.jsonText = ta.value;
+  q._issues = (q._issues || []).concat(['answer key changed ' + String.fromCharCode(65 + Number(q.correct || 0)) + ' → ' + String.fromCharCode(65 + k) + ' (AI check)']);
+  q.correct = k; q.answerText = q.options[k];
+  if (q._ai) { q._ai.fixed = true; q._ai.ok = q._ai.sol && q._ai.qok; }
+  renderAdminInputQuestionContent();
+}
+function applyAllAiKeys() {
+  var list = inputQState.validatedPreview || [], n = 0;
+  list.forEach(function(q) {
+    if (q._ai && q._ai.k !== null && q._ai.k !== Number(q.correct || 0)) {
+      q._issues = (q._issues || []).concat(['answer key changed ' + String.fromCharCode(65 + Number(q.correct || 0)) + ' → ' + String.fromCharCode(65 + q._ai.k) + ' (AI check)']);
+      q.correct = q._ai.k; q.answerText = q.options[q._ai.k]; q._ai.fixed = true; q._ai.ok = q._ai.sol && q._ai.qok; n++;
+    }
+  });
+  var ta = document.getElementById('inputq-json-textarea');
+  if (ta) inputQState.jsonText = ta.value;
+  showToast('✔ ' + n + ' answer key(s) corrected by the AI check.', 'success');
+  renderAdminInputQuestionContent();
+}
+// the box under a question in the preview
+function aiKeyBoxHtml(q, i) {
+  var a = q._ai;
+  if (!a) return '';
+  if (a.ok) return '<div style="margin-top:6px; font-size:0.78rem; color:#86efac;">🤖 AI solved it: <b>' + mx(a.ans) + '</b> — answer key ✔' + (a.fixed ? ' (corrected)' : '') + '</div>';
+  var L = function(k) { return String.fromCharCode(65 + k); };
+  var lines = [];
+  if (a.k !== null && a.k !== Number(q.correct || 0)) lines.push('The right option is <b>' + L(a.k) + ') ' + mx(q.options[a.k]) + '</b>, but <b>' + L(Number(q.correct || 0)) + '</b> is marked. <button type="button" class="btn btn-amber btn-xs" onclick="setPreviewCorrect(' + i + ', ' + a.k + ')">✔ Make ' + L(a.k) + ' correct</button>');
+  if (a.none) lines.push('<b>None of the options</b> is correct — fix the options (✏️ in the JSON) or remove this question.');
+  if (!a.sol) lines.push('The <b>solution</b> has a mistake / ends with another value.');
+  if (!a.qok) lines.push('The <b>question</b> itself looks wrong or incomplete.');
+  return '<div style="margin-top:6px; padding:7px 9px; border-radius:8px; background:rgba(220,38,38,0.14); border:2px solid #dc2626; font-size:0.8rem; color:#fecaca;">' +
+    '🤖 <b>AI check — please look:</b> AI\'s answer: <b>' + mx(a.ans) + '</b>' + (a.why ? ' — ' + esc(a.why) : '') +
+    '<ul style="margin:4px 0 0 18px; padding:0; line-height:1.6;">' + lines.map(function(l) { return '<li>' + l + '</li>'; }).join('') + '</ul></div>';
+}
 // "Add anyway" for a question that looks like a duplicate
 function setPreviewForce(i, on) {
   var q = (inputQState.validatedPreview || [])[i];
@@ -11163,6 +11259,8 @@ function checkInputJson() {
     var dupN = list.filter(function(q) { return q._dup; }).length;
     showToast(bad ? '⚠️ ' + bad + ' question(s) have problems — see the list.'
       : '✅ ' + list.length + ' questions found' + (dupN ? ' — ' + dupN + ' are already in your bank (or repeated) and will be skipped.' : '.'), (bad || dupN) ? 'error' : 'success');
+    // 🤖 the AI answer check starts by itself (every answer key solved and compared before saving)
+    if (getAiKey()) setTimeout(function() { aiKeyCheckPreview(true); }, 400);
   } catch (e) {
     inputQState.validatedPreview = [];
     renderAdminInputQuestionContent();
@@ -11252,6 +11350,7 @@ function renderAdminInputQuestionContent() {
           (q.explanation ? '<div class="qp-sol"><div class="qp-sol-h">💡 Solution</div>' + mx(q.explanation) + '</div>' : '') +
         '</div>' +
         (notes.length ? '<div style="margin-top:6px; font-size:0.8rem; color:#fca5a5;">⚠ ' + esc(notes.join(' • ')) + '</div>' : '') +
+        aiKeyBoxHtml(q, i) +
         (q.needsFigure ? '<div class="blink-live" style="margin-top:6px; font-size:0.8rem; color:#fcd34d; border:1px dashed #f59e0b; border-radius:8px; padding:5px 9px;">🖼️ A picture was here' + (q.figurePage ? ' (PDF page ' + q.figurePage + ')' : '') + ' — needs a picture' + (q.figureNote ? ': <i>' + esc(q.figureNote) + '</i>' : '') + ' — after saving, the 🖼️ Pictures list opens by itself.</div>' : '') +
         dupBox +
       '</div>';    }).join('');
@@ -11260,10 +11359,14 @@ function renderAdminInputQuestionContent() {
         '<h3 style="margin:0 0 4px 0; color:#6ee7b7;">✅ Check result</h3>' +
         '<p style="margin:0 0 10px 0; font-size:0.84rem; color:#cbd5e1;"><b>' + good.length + '</b> new question(s) ready for <b>' + esc(inputQState.targetClass) + '</b>' +
           ' • with 4 options (MCQ): <b>' + withOpts + '</b> • with solution (Subjective): <b>' + withSol + '</b>' +
-          (dups ? ' • already in bank: <b>' + dups + '</b>' : '') + (errs ? ' • problems: <b>' + errs + '</b>' : '') + '</p>' +
+          (dups ? ' • already in bank: <b>' + dups + '</b>' : '') + (errs ? ' • problems: <b>' + errs + '</b>' : '') +
+          (function() { var a = good.filter(function(q) { return q._ai; }), b = a.filter(function(q) { return !q._ai.ok; }).length;
+            return a.length ? ' • 🤖 AI checked: <b>' + a.length + '</b>' + (b ? ' — <b style="color:#fca5a5;">' + b + ' need a look (red boxes)</b>' : ' — <b style="color:#86efac;">all right ✅</b>') : (aiKeyBusy ? ' • 🤖 AI is checking the answers…' : ''); })() + '</p>' +
         '<div class="chip-row" style="margin:0 0 12px 0;">' + chips + '</div>' +
         '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">' +
           '<button type="button" onclick="saveValidatedQuestionsToBank()" class="btn btn-green" ' + (good.length ? '' : 'disabled') + '>💾 Save ' + good.length + ' Question(s) to Question Bank — ' + esc(inputQState.targetClass) + '</button>' +
+          '<button type="button" id="ai-key-btn" onclick="aiKeyCheckPreview()" class="btn btn-amber btn-sm" title="The AI solves every question and checks the answer key, options and solution">🤖 AI answer check' + (prev.some(function(q) { return q._ai; }) ? ' (again)' : '') + '</button>' +
+          (prev.some(function(q) { return q._ai && q._ai.k !== null && q._ai.k !== Number(q.correct || 0); }) ? '<button type="button" onclick="applyAllAiKeys()" class="btn btn-red btn-sm">✔ Fix all ' + prev.filter(function(q) { return q._ai && q._ai.k !== null && q._ai.k !== Number(q.correct || 0); }).length + ' wrong key(s)</button>' : '') +
           '<button type="button" id="ai-dup-btn" onclick="aiDupCheckPreview()" class="btn btn-purple btn-sm" title="Finds questions copied from another book in different words">🤖 AI check for copies</button>' +
           '<button type="button" onclick="clearInputPreview()" class="btn btn-slate btn-sm">Clear</button>' +
         '</div>' +
@@ -11372,7 +11475,7 @@ function saveValidatedQuestionsToBank() {
   var impName = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' + now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' — ' + Object.keys(chs).slice(0, 3).join(', ') + (Object.keys(chs).length > 3 ? ' …' : '');
   list.forEach(function(q) {
     var c = Object.assign({}, q);
-    delete c._issues; delete c._error; delete c._dup; delete c._force; delete c._jsonChapter; delete c._maybe;
+    delete c._issues; delete c._error; delete c._dup; delete c._force; delete c._jsonChapter; delete c._maybe; delete c._ai;
     c.importId = impId; c.importName = impName; c.importAt = now.getTime();
     qb.push(c);
   });
@@ -12269,24 +12372,40 @@ function examPoolFor(st) {
     if (st.filterDifficulty && st.filterDifficulty !== 'ALL' && (q.difficulty || 'Medium') !== st.filterDifficulty) return false;
     return true;
   });
+  // when each question was last used in an exam of this class (id or the same words)
   var usedId = {}, usedText = {};
   if (st.avoidUsed) {
     DB.get(K.T).forEach(function(t) {
       if (t.id === st.editingTestId) return;
       if ((t.targetBatch || '') !== st.targetClass) return;
-      (t.questions || []).forEach(function(q) { usedId[q.id] = 1; usedText[normQText(q.text)] = 1; });
+      var at = Number(t.startAtMs || t.createdAt || 0);
+      (t.questions || []).forEach(function(q) {
+        usedId[q.id] = Math.max(usedId[q.id] || 0, at || 1);
+        var nt0 = normQText(q.text); usedText[nt0] = Math.max(usedText[nt0] || 0, at || 1);
+      });
     });
   }
-  var seen = {}, out = [], stats = { dup: 0, used: 0, noOpt: 0, total: cand.length };
+  var seen = {}, out = [], reuse = [], stats = { dup: 0, used: 0, noOpt: 0, total: cand.length };
   cand.forEach(function(q) {
     var nt = normQText(q.text);
     if (seen[nt]) { stats.dup++; return; }
     seen[nt] = 1;
-    if (st.avoidUsed && (usedId[q.id] || usedText[nt])) { stats.used++; return; }
     if (st.examFormatMode === 'MCQ' && !hasOptions(q)) { stats.noOpt++; return; }
+    var usedAt = st.avoidUsed ? Math.max(usedId[q.id] || 0, usedText[nt] || 0) : 0;
+    if (usedAt) { stats.used++; reuse.push({ q: q, at: usedAt }); return; }   // kept aside: only if new ones run out
     out.push(q);
   });
-  return { pool: out, stats: stats };
+  return { pool: out, stats: stats, reuse: reuse };
+}
+// 🔁 the questions in the order they are taken: NEW ones (never in an earlier exam of this class) first, mixed;
+// only if they run out, the ones used LONGEST ago (never the questions of the last exam first)
+function examPoolOrdered(st) {
+  var info = examPoolFor(st);
+  var fresh = shuffleArr(info.pool.slice());
+  var old = (info.reuse || []).sort(function(a, b) { return a.at - b.at; }).map(function(x) { return x.q; });
+  var all = fresh.concat(old);
+  all.freshN = fresh.length;
+  return all;
 }
 
 // ---------- 👤 "only for chosen students": an exam / homework / assignment for one or a few students ----------
@@ -12564,12 +12683,13 @@ function renderExamBuilderModalBody() {
     : '<span style="color:#fca5a5; font-size:0.84rem;">There are no questions for ' + esc(st.targetClass) + ' yet. Add them in “Input Questions” first.</span>';
 
   var info = examPoolFor(st);
-  var avail = info.pool.length, N = Number(st.questionsPerStudent || 0);
+  // new questions + (only if needed) the ones used longest ago — so an exam can always be made
+  var avail = info.pool.length + (info.reuse || []).length, N = Number(st.questionsPerStudent || 0);
   // questions ticked by hand: the exam uses exactly these
   var pickList = inClass.filter(function(q) { return st.pickIds && st.pickIds[q.id]; });
   // how many questions of each difficulty are available, and the Easy / Medium / Hard mix asked for
   var avD = { Easy: 0, Medium: 0, Hard: 0 };
-  info.pool.forEach(function(q) { avD[q.difficulty === 'Easy' || q.difficulty === 'Hard' ? q.difficulty : 'Medium']++; });
+  info.pool.concat((info.reuse || []).map(function(x) { return x.q; })).forEach(function(q) { avD[q.difficulty === 'Easy' || q.difficulty === 'Hard' ? q.difficulty : 'Medium']++; });
   var useMix = st.useMix && !pickList.length && st.examFormatMode !== 'AS_IS';
   var mixShort = [];
   if (useMix) {
@@ -12579,7 +12699,7 @@ function renderExamBuilderModalBody() {
   if (pickList.length) { avail = pickList.length; N = pickList.length; }
   var short = avail < N || mixShort.length > 0 || N < 1;
   var excl = [];
-  if (info.stats.used) excl.push(info.stats.used + ' used in earlier exams');
+  if (info.stats.used) excl.push(info.stats.used + ' used in earlier exams (taken only if the new ones are not enough, the oldest first)');
   if (info.stats.dup) excl.push(info.stats.dup + ' repeated');
   if (info.stats.noOpt) excl.push(info.stats.noOpt + ' without options');
   // MCQ exam: questions that are still "question only" can be turned into MCQ right here
@@ -12750,7 +12870,7 @@ function saveExamFromBuilder() {
     });
   } else if (useMix) {
     // random, by difficulty: e.g. 5 Easy + 15 Medium + 10 Hard from all the chosen chapters
-    var poolD = shuffleArr(examPoolFor(st).pool.slice());
+    var poolD = examPoolOrdered(st);     // new questions first, old ones only to fill a gap
     var lack = [];
     selected = [];
     ['Easy', 'Medium', 'Hard'].forEach(function(d) {
@@ -12769,7 +12889,7 @@ function saveExamFromBuilder() {
     if (lack.length) { showToast('Not enough questions: ' + lack.join(', ') + '. Tick more chapters / topics or lower the numbers.', 'error'); return; }
   } else {
     var info = examPoolFor(st);
-    var pool = shuffleArr(info.pool.slice());
+    var pool = examPoolOrdered(st);     // new questions first, old ones only to fill a gap
     if (pool.length < N) { showToast('Only ' + pool.length + ' question(s) are available but you asked for ' + N + '. Select more chapters or lower the number.', 'error'); return; }
     if (mixed) {
       var S = Math.min(N, Math.max(0, st.subjCount)), M = N - S;
@@ -12794,6 +12914,14 @@ function saveExamFromBuilder() {
     }
   }
 
+  // 🔁 how many questions had to come from earlier exams (only when there were not enough new ones)
+  var reN = 0;
+  if (st.avoidUsed && !picked.length && selected) {
+    var oldIds = {};
+    (examPoolFor(st).reuse || []).forEach(function(x) { oldIds[x.q.id] = 1; });
+    reN = selected.filter(function(c) { return oldIds[c.id]; }).length;
+  }
+  if (reN) setTimeout(function() { showToast('ℹ️ Not enough NEW questions in these chapters — ' + reN + ' question(s) were taken from earlier exams (the ones used longest ago). Add more questions to the bank to avoid this.', 'error'); }, 1200);
   var tests = DB.get(K.T);
   var testObj = {
     id: st.editingTestId || ('test_' + Date.now()),

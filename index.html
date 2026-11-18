@@ -1061,12 +1061,12 @@
       border-radius: 14px;
       border: 3px solid var(--amber-main);
       text-align: center;
-      max-width: 240px;
+      max-width: 300px;
       margin: 0 auto;
     }
     .qr-display-box img {
-      width: 180px;
-      height: 180px;
+      width: 240px; max-width: 100%;
+      height: auto; aspect-ratio: 1 / 1;
       object-fit: contain;
       display: block;
       margin: 0 auto 8px auto;
@@ -2617,15 +2617,116 @@ function handleQRImageUpload(e) {
   var f = e.target.files ? e.target.files[0] : null;
   e.target.value = '';
   if (!f) return;
-  compressImage(f, 800, 0.92, function(dataUrl) {
-    if (!dataUrl) return;
-    var cfg = DB.getPayConfig();
-    cfg.qrDataUrl = dataUrl;
-    DB.setPayConfig(cfg);
-    var prev = document.getElementById('admin-qr-preview-img');
-    if (prev) prev.src = dataUrl;
-    showToast('Custom UPI QR Code Image uploaded!', 'success');
+  // the photo / screenshot is opened in the ✂️ zoom & crop tool — only the QR square is kept, big and sharp
+  compressImage(f, 1600, 0.95, function(dataUrl) { if (dataUrl) openQrCrop(dataUrl); });
+}
+
+// ✂️ QR ZOOM & CROP: pinch / slider to zoom, drag to move, the square frame is what students see
+var qrCrop = null;
+function openQrCrop(src) {
+  var img = new Image();
+  img.onload = function() {
+    var V = 300;                                        // the frame on the screen (px)
+    var fit = V / Math.min(img.width, img.height);      // zoom 1 = the short side fills the frame
+    qrCrop = { img: img, V: V, fit: fit, z: 1, x: 0, y: 0 };
+    document.getElementById('row-editor-body').innerHTML =
+      '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h3 style="margin:0;">✂️ Zoom &amp; crop the QR</h3><button type="button" onclick="openPaymentQRConfigModal()" class="btn btn-slate btn-sm">◀ Back</button></div>' +
+      '<p style="margin:0 0 8px 0; font-size:0.84rem; color:var(--text-muted);">Make the QR <b>fill the white square</b>: zoom with the slider (or two fingers / mouse wheel) and drag the picture. Keep a thin white edge around the QR.</p>' +
+      '<div style="display:flex; justify-content:center;"><canvas id="qrc-cv" width="' + V + '" height="' + V + '" style="width:' + V + 'px; height:' + V + 'px; max-width:100%; border:3px solid #f59e0b; border-radius:10px; background:#fff; touch-action:none; cursor:grab;"></canvas></div>' +
+      '<div style="display:flex; align-items:center; gap:8px; margin:10px 0;"><span>➖</span><input id="qrc-z" type="range" min="1" max="6" step="0.01" value="1" style="flex:1;" oninput="qrCrop.z=Number(this.value); qrCropDraw()"><span>➕</span></div>' +
+      '<div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center;">' +
+        '<button type="button" class="btn btn-slate btn-sm" onclick="qrCrop.z=1; qrCrop.x=0; qrCrop.y=0; document.getElementById(\'qrc-z\').value=1; qrCropDraw()">↺ Reset</button>' +
+        '<button type="button" class="btn btn-slate btn-sm" onclick="qrCropAuto()">🎯 Find the QR by itself</button>' +
+        '<button type="button" class="btn btn-green" onclick="qrCropSave()">✓ Use this QR</button></div>';
+    document.getElementById('row-editor-modal').classList.remove('hidden');
+    qrCropWire();
+    qrCropAuto(true);
+  };
+  img.onerror = function() { showToast('This picture could not be opened.', 'error'); };
+  img.src = src;
+}
+function qrCropClamp() {
+  var c = qrCrop, s = c.fit * c.z, w = c.img.width * s, h = c.img.height * s;
+  var mx = Math.max(0, (w - c.V) / 2), my = Math.max(0, (h - c.V) / 2);
+  c.x = Math.max(-mx, Math.min(mx, c.x)); c.y = Math.max(-my, Math.min(my, c.y));
+}
+function qrCropDraw(cv, size) {
+  var c = qrCrop; if (!c) return;
+  qrCropClamp();
+  cv = cv || document.getElementById('qrc-cv'); if (!cv) return;
+  size = size || c.V;
+  var k = size / c.V, s = c.fit * c.z * k, g = cv.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, size, size);
+  g.imageSmoothingQuality = 'high';
+  var w = c.img.width * s, h = c.img.height * s;
+  g.drawImage(c.img, size / 2 - w / 2 + c.x * k, size / 2 - h / 2 + c.y * k, w, h);
+}
+function qrCropWire() {
+  var cv = document.getElementById('qrc-cv'), pts = {}, last = null, pinch0 = 0, z0 = 1;
+  var setZ = function(z) { qrCrop.z = Math.max(1, Math.min(6, z)); document.getElementById('qrc-z').value = qrCrop.z; };
+  cv.addEventListener('pointerdown', function(e) { cv.setPointerCapture(e.pointerId); pts[e.pointerId] = { x: e.clientX, y: e.clientY }; last = { x: e.clientX, y: e.clientY }; var k = Object.keys(pts); if (k.length === 2) { var a = pts[k[0]], b = pts[k[1]]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); z0 = qrCrop.z; } });
+  cv.addEventListener('pointermove', function(e) {
+    if (!pts[e.pointerId]) return;
+    pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var k = Object.keys(pts), scale = qrCrop.V / cv.getBoundingClientRect().width;
+    if (k.length === 2 && pinch0) { var a = pts[k[0]], b = pts[k[1]]; setZ(z0 * Math.hypot(a.x - b.x, a.y - b.y) / pinch0); }
+    else if (last) { qrCrop.x += (e.clientX - last.x) * scale; qrCrop.y += (e.clientY - last.y) * scale; }
+    last = { x: e.clientX, y: e.clientY };
+    qrCropDraw();
   });
+  var up = function(e) { delete pts[e.pointerId]; pinch0 = 0; last = null; };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  cv.addEventListener('wheel', function(e) { e.preventDefault(); setZ(qrCrop.z * (e.deltaY < 0 ? 1.08 : 1 / 1.08)); qrCropDraw(); }, { passive: false });
+}
+// 🎯 finds the dark QR pattern in the picture and zooms to it (works for most screenshots / photos)
+function qrCropAuto(quiet) {
+  var c = qrCrop, img = c.img, S = 200, sc = S / Math.max(img.width, img.height);
+  var w = Math.max(1, Math.round(img.width * sc)), h = Math.max(1, Math.round(img.height * sc));
+  var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  var g = cv.getContext('2d'); g.drawImage(img, 0, 0, w, h);
+  var d = g.getImageData(0, 0, w, h).data;
+  // dark pixels that sit next to light ones (the QR's many edges) — their bounding box is the QR
+  var minX = w, minY = h, maxX = -1, maxY = -1, lum = function(i) { return d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; };
+  var rowCnt = new Array(h).fill(0), colCnt = new Array(w).fill(0);
+  for (var y = 1; y < h; y++) for (var x = 1; x < w; x++) {
+    var i = (y * w + x) * 4, a = lum(i), l = lum(i - 4), u = lum(i - w * 4);
+    if (Math.abs(a - l) > 90 || Math.abs(a - u) > 90) { rowCnt[y]++; colCnt[x]++; }
+  }
+  var thr = function(arr, n) { var m = Math.max.apply(null, arr); return m * 0.25; };
+  var tr = thr(rowCnt), tc = thr(colCnt);
+  for (y = 0; y < h; y++) if (rowCnt[y] > tr) { minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+  for (x = 0; x < w; x++) if (colCnt[x] > tc) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
+  if (maxX < 0 || maxY < 0 || maxX - minX < 15 || maxY - minY < 15) { qrCropDraw(); if (!quiet) showToast('Could not find the QR — zoom and drag by hand.', 'error'); return; }
+  var side = Math.max(maxX - minX, maxY - minY) / sc * 1.12;          // + a thin white edge
+  var cx = (minX + maxX) / 2 / sc, cy = (minY + maxY) / 2 / sc;
+  c.z = Math.max(1, Math.min(6, c.V / (side * c.fit)));
+  var s = c.fit * c.z;
+  c.x = (img.width / 2 - cx) * s; c.y = (img.height / 2 - cy) * s;
+  document.getElementById('qrc-z').value = c.z;
+  qrCropDraw();
+}
+function qrCropSave() {
+  var out = document.createElement('canvas'); out.width = 720; out.height = 720;
+  qrCropDraw(out, 720);
+  var dataUrl = out.toDataURL('image/jpeg', 0.95);
+  var cfg = DB.getPayConfig();
+  cfg.qrDataUrl = dataUrl;
+  DB.setPayConfig(cfg);
+  qrCrop = null;
+  showToast('✅ QR saved — big and clear for the students.', 'success');
+  openPaymentQRConfigModal();
+}
+// 🔍 the student taps the QR: it opens over the whole screen (easy to scan from another phone) + download
+function openQrBig() {
+  var src = (DB.getPayConfig() || {}).qrDataUrl;
+  if (!src) return;
+  var o = document.createElement('div');
+  o.style.cssText = 'position:fixed; inset:0; z-index:9500; background:rgba(2,6,23,0.94); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:16px; gap:12px;';
+  o.innerHTML = '<img src="' + src + '" alt="QR" style="width:min(92vw, 80vh, 560px); height:auto; background:#fff; border-radius:12px; padding:10px;">' +
+    '<div style="display:flex; gap:8px;"><a class="btn btn-green" style="color:#fff;" href="' + src + '" download="ACSM-UPI-QR.jpg" onclick="event.stopPropagation()">⬇ Save QR to the phone</a><button type="button" class="btn btn-slate">✕ Close</button></div>' +
+    '<div style="color:#cbd5e1; font-size:0.8rem; text-align:center;">Scan it from another phone, or save it and choose it from the gallery in your UPI app.</div>';
+  o.addEventListener('click', function() { o.remove(); });
+  document.body.appendChild(o);
 }
 
 window.addEventListener('load', function() { if (cloud.role) renderMath(document.body); });
@@ -3310,7 +3411,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118225353';
+var APP_BUILD = '20261118230249';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -6614,7 +6715,7 @@ function renderStudentDashContent(live) {
       '<div class="page-title" style="margin-top:6px;">🧾 Your Receipts</div>' + receiptCards +
       '<div class="page-title" style="margin-top:6px;">Pay your fee</div>' +
       '<div class="card card-amber">' +
-        (payCfg.qrDataUrl ? '<div class="qr-display-box"><img src="' + qrSrc + '" alt="QR"></div>' : '') +
+        (payCfg.qrDataUrl ? '<div class="qr-display-box" style="cursor:zoom-in;" onclick="openQrBig()"><img src="' + qrSrc + '" alt="QR"><div style="font-size:0.76rem; font-weight:700; color:#475569;">🔍 Tap to make it big / save it</div></div>' : '') +
         (payCfg.upiId
           ? '<p style="text-align:center; margin:10px 0 0 0; font-size:0.84rem;">UPI ID: <b style="color:#fcd34d;">' + esc(payCfg.upiId) + '</b></p>' +
             '<div style="display:flex; gap:8px; margin-top:12px;">' +
@@ -10043,7 +10144,9 @@ function openPaymentQRConfigModal() {
       '<div>' +
         '<label class="label">Payee Name</label><input type="text" id="cfg-payee" class="input" value="' + escA(cfg.payeeName) + '">' +
         '<label class="label">Official UPI ID</label><input type="text" id="cfg-upi" class="input" value="' + escA(cfg.upiId) + '">' +
-        '<button type="button" onclick="document.getElementById(\'qr-file-input\').click()" class="btn btn-amber btn-sm">📤 Upload Custom QR Image</button>' +
+        '<div style="display:flex; gap:6px; flex-wrap:wrap;"><button type="button" onclick="document.getElementById(\'qr-file-input\').click()" class="btn btn-amber btn-sm">📤 Upload QR (photo / screenshot)</button>' +
+          (cfg.qrDataUrl ? '<button type="button" onclick="openQrCrop(DB.getPayConfig().qrDataUrl)" class="btn btn-purple btn-sm">✂️ Zoom &amp; crop this QR</button>' : '') + '</div>' +
+        '<div style="font-size:0.76rem; color:var(--text-muted); margin-top:6px;">After uploading, a zoom tool opens: make the QR fill the square so students can scan it easily.</div>' +
       '</div>' +
       '<div style="text-align:center;">' +
         '<div class="qr-display-box"><img id="admin-qr-preview-img" src="' + qrImgSrc + '" alt="QR"></div>' +
@@ -12729,16 +12832,16 @@ function renderAdminTestsContent() {
     return;
   }
   // 🏫 one class at a time (Class 9 / 10 / 11 …) — or all
-  var clsAll = [];
-  tests.forEach(function(t) { var c = t.targetBatch || 'ALL'; if (clsAll.indexOf(c) === -1) clsAll.push(c); });
-  var order = studentClasses();
-  clsAll.sort(function(a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || String(a).localeCompare(String(b)); });
+  // every class of the portal (also those without an exam yet), in the usual order — chosen from one list
+  var clsAll = studentClasses().slice();
+  tests.forEach(function(t) { var c = t.targetBatch || 'ALL'; if (c !== 'ALL' && clsAll.indexOf(c) === -1) clsAll.push(c); });
   if (testsCls !== 'ALL' && clsAll.indexOf(testsCls) === -1) testsCls = 'ALL';
-  var clsBar = '<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:10px;"><span class="label" style="margin:0;">🏫 Class</span>' +
+  var clsBar = '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;"><label class="label" style="margin:0;">🏫 Class</label>' +
+    '<select class="select" style="max-width:220px; margin:0;" onchange="testsCls=this.value; renderAdminTestsContent()">' +
     ['ALL'].concat(clsAll).map(function(c) {
       var n = c === 'ALL' ? tests.length : tests.filter(function(t) { return (t.targetBatch || 'ALL') === c; }).length;
-      return '<span class="part-tab ' + (testsCls === c ? 'active' : '') + '" onclick="testsCls=\'' + escA(c) + '\'; renderAdminTestsContent()">' + (c === 'ALL' ? 'All classes' : esc(c)) + ' <span class="part-count">' + n + '</span></span>';
-    }).join('') + '</div>';
+      return '<option value="' + escA(c) + '"' + (testsCls === c ? ' selected' : '') + '>' + (c === 'ALL' ? 'All classes' : esc(c)) + ' (' + n + ')</option>';
+    }).join('') + '</select></div>';
   if (testsCls !== 'ALL') tests = tests.filter(function(t) { return (t.targetBatch || 'ALL') === testsCls; });
   var mcqList = tests.filter(function(t) { return !isPaperExam(t); }), subjList = tests.filter(isPaperExam);
   var tabsHtml = clsBar + '<div class="view-switch" style="margin-bottom:12px;">' +

@@ -3310,7 +3310,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118215316';
+var APP_BUILD = '20261118225353';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -12679,6 +12679,7 @@ function examWindowState(t) {
   return 'live';
 }
 
+var testsCls = 'ALL';      // the class whose exams are shown (Exams page)
 function renderAdminTestsContent() {
   var tests = DB.get(K.T);
   var subs = DB.get(K.S);
@@ -12727,8 +12728,20 @@ function renderAdminTestsContent() {
       section('🏆 JEE MCQ Exams', 'WBJEE / JEE Main / JEE Advanced practice exams — MCQ only. Class 11 and Class 12 students see them in their app. Marks, answers and solutions are shown right after they submit.', 'MCQ', '+ Create JEE Exam', tests);
     return;
   }
+  // 🏫 one class at a time (Class 9 / 10 / 11 …) — or all
+  var clsAll = [];
+  tests.forEach(function(t) { var c = t.targetBatch || 'ALL'; if (clsAll.indexOf(c) === -1) clsAll.push(c); });
+  var order = studentClasses();
+  clsAll.sort(function(a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || String(a).localeCompare(String(b)); });
+  if (testsCls !== 'ALL' && clsAll.indexOf(testsCls) === -1) testsCls = 'ALL';
+  var clsBar = '<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:10px;"><span class="label" style="margin:0;">🏫 Class</span>' +
+    ['ALL'].concat(clsAll).map(function(c) {
+      var n = c === 'ALL' ? tests.length : tests.filter(function(t) { return (t.targetBatch || 'ALL') === c; }).length;
+      return '<span class="part-tab ' + (testsCls === c ? 'active' : '') + '" onclick="testsCls=\'' + escA(c) + '\'; renderAdminTestsContent()">' + (c === 'ALL' ? 'All classes' : esc(c)) + ' <span class="part-count">' + n + '</span></span>';
+    }).join('') + '</div>';
+  if (testsCls !== 'ALL') tests = tests.filter(function(t) { return (t.targetBatch || 'ALL') === testsCls; });
   var mcqList = tests.filter(function(t) { return !isPaperExam(t); }), subjList = tests.filter(isPaperExam);
-  var tabsHtml = '<div class="view-switch" style="margin-bottom:12px;">' +
+  var tabsHtml = clsBar + '<div class="view-switch" style="margin-bottom:12px;">' +
     '<span class="part-tab ' + (testsView === 'MCQ' ? 'active' : '') + '" onclick="switchAdminTab(\'tests-mcq\')">🖥️ Online / MCQ Test <span class="part-count">' + mcqList.length + '</span></span>' +
     '<span class="part-tab ' + (testsView === 'Subjective' ? 'active' : '') + '" onclick="switchAdminTab(\'tests-subj\')">✍️ Subjective Test <span class="part-count">' + subjList.length + '</span></span>' +
   '</div>';

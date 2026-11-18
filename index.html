@@ -3087,7 +3087,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118205252';
+var APP_BUILD = '20261118211005';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -6937,6 +6937,12 @@ function makeStudentReport() {
       '<div><span>Total fee (per month)</span><b>' + e(fmtINR(fs.expected)) + '</b><i>' + fs.total + ' student(s)</i></div>' +
       '<div class="ok"><span>Paid for ' + e(repMonthName) + '</span><b>' + e(fmtINR(fs.collected)) + '</b><i>' + fs.paidCount + ' paid' + (fs.partialCount ? ', ' + fs.partialCount + ' part' : '') + '</i></div>' +
       '<div class="bad"><span>Still due</span><b>' + e(fmtINR(fs.due)) + '</b><i>' + (fs.dueCount + fs.pendingCount + fs.partialCount) + ' student(s)</i></div>' +
+    '</div>' +
+    // 🌐 / 💵 how the money came: online and offline
+    '<div class="fbg" style="margin-top:6px;">' +
+      '<div class="ok"><span>🌐 Online — for ' + e(repMonthName) + '</span><b>' + e(fmtINR(fs.online)) + '</b><i>of ' + e(fmtINR(fs.collected)) + ' paid</i></div>' +
+      '<div class="ok"><span>💵 Offline — for ' + e(repMonthName) + '</span><b>' + e(fmtINR(fs.offline)) + '</b><i>of ' + e(fmtINR(fs.collected)) + ' paid</i></div>' +
+      '<div><span>💰 Received in ' + e(repMonthName) + ' (any month\'s fee)</span><b>' + e(fmtINR(fs.recv)) + '</b><i>🌐 ' + e(fmtINR(fs.recvOn)) + ' • 💵 ' + e(fmtINR(fs.recvOff)) + ' • ' + fs.recvCount + ' payment(s)</i></div>' +
     '</div></div>';
 
   // summary: class × board (West Bengal split by semester)
@@ -6971,7 +6977,7 @@ function makeStudentReport() {
     }).join('');
     var cs = showFee ? monthFeeSummary(inC, repY, repK) : null;
     var subRow = !showFee ? '' :
-      '<tr class="tot"><td colspan="' + (photos ? 9 : 8) + '" style="text-align:right;">' + e(c) + ' total — Paid: ' + e(fmtINR(cs.collected)) + ' • Due: ' + e(fmtINR(cs.due)) + '</td>' +
+      '<tr class="tot"><td colspan="' + (photos ? 9 : 8) + '" style="text-align:right;">' + e(c) + ' total — Paid: ' + e(fmtINR(cs.collected)) + ' (🌐 Online ' + e(fmtINR(cs.online)) + ' • 💵 Offline ' + e(fmtINR(cs.offline)) + ') • Due: ' + e(fmtINR(cs.due)) + '</td>' +
       '<td class="n">' + e(fmtINR(cs.expected)) + '</td><td class="n">' + cs.paidCount + '/' + cs.total + '</td></tr>';
     return '<section><h2>' + e(c) + ' — ' + inC.length + ' student(s)</h2><table class="det"><thead><tr><th>#</th>' + (photos ? '<th>Photo</th>' : '') +
       '<th>Name / Reg. No</th><th>Phone / E-mail</th><th>Board / Sem</th><th>School</th><th>Session / Admitted</th><th>Batch</th><th>Guardian</th><th>Fee / month</th>' + (showFee ? '<th>' + e(MONTH_NAMES[Number(repK) - 1] || '') + '</th>' : '') + '</tr></thead><tbody>' + rows + subRow + '</tbody></table></section>';
@@ -7345,11 +7351,11 @@ function renderFeeStatsHtml() {
       '<span style="font-size:0.76rem; color:var(--text-muted);">money is counted in the month it is FOR, whatever the date it was paid</span></div>' +
     '<div class="grid-3" style="margin-bottom:12px;">' +
       '<div class="stat-mini"><div class="sm-l">📋 Total fee for ' + mn + ' (' + ms.total + ' students)</div><div class="sm-v" style="color:#fcd34d;">' + fmtINR(ms.expected) + '</div><div style="font-size:0.7rem; color:var(--text-muted);">all students\' monthly fees added</div></div>' +
-      '<div class="stat-mini"><div class="sm-l">✅ Paid for ' + mn + ' (' + (ms.paidCount + ms.partialCount) + ' students)</div><div class="sm-v" style="color:#34d399;">' + fmtINR(ms.collected) + '</div></div>' +
+      '<div class="stat-mini"><div class="sm-l">✅ Paid for ' + mn + ' (' + (ms.paidCount + ms.partialCount) + ' students)</div><div class="sm-v" style="color:#34d399;">' + fmtINR(ms.collected) + '</div><div style="font-size:0.74rem; color:#cbd5e1; margin-top:2px;">🌐 Online <b>' + fmtINR(ms.online) + '</b> • 💵 Offline <b>' + fmtINR(ms.offline) + '</b></div></div>' +
       '<div class="stat-mini"><div class="sm-l">⏳ Still due for ' + mn + ' (' + (ms.total - ms.paidCount) + ' students)</div><div class="sm-v" style="color:#f87171;">' + fmtINR(ms.due) + '</div></div>' +
     '</div>' +
     // 💰 the money that came in THIS calendar month, split by what it is for
-    '<div style="font-size:0.8rem; font-weight:800; color:#e2e8f0; margin:2px 0 6px 0;">💰 Money received in ' + MONTH_FULL[now.getMonth()] + ' ' + now.getFullYear() + ': <span style="color:#34d399;">' + fmtINR(t.month) + '</span> <span style="font-weight:600; color:var(--text-muted);">(' + t.monthCount + ' payment' + (t.monthCount === 1 ? '' : 's') + ')</span></div>' +
+    '<div style="font-size:0.8rem; font-weight:800; color:#e2e8f0; margin:2px 0 6px 0;">💰 Money received in ' + MONTH_FULL[now.getMonth()] + ' ' + now.getFullYear() + ': <span style="color:#34d399;">' + fmtINR(t.month) + '</span> <span style="font-weight:600; color:var(--text-muted);">(' + t.monthCount + ' payment' + (t.monthCount === 1 ? '' : 's') + ')</span> &nbsp;🌐 Online <span style="color:#34d399;">' + fmtINR(t.monthOn || 0) + '</span> • 💵 Offline <span style="color:#fcd34d;">' + fmtINR(t.monthOff || 0) + '</span></div>' +
     '<div class="grid-3" style="margin-bottom:8px;">' +
       '<div class="stat-mini"><div class="sm-l">✅ for ' + MONTH_FULL[now.getMonth()] + ' itself (' + t.curCount + ')</div><div class="sm-v" style="color:#34d399;">' + fmtINR(Math.round(t.cur)) + '</div></div>' +
       '<div class="stat-mini"><div class="sm-l">↩ old dues — earlier months (' + t.backCount + ')</div><div class="sm-v" style="color:#93c5fd;">' + fmtINR(Math.round(t.back)) + '</div></div>' +
@@ -9870,6 +9876,7 @@ function feeTotals() {
     if (d.slice(0, 7) === ym) {
       // what came in THIS month, split: for this month • old dues (earlier months) • advance (coming months)
       t.month += amt; t.monthCount++;
+      if (feeIsOffline(f)) t.monthOff = (t.monthOff || 0) + amt; else t.monthOn = (t.monthOn || 0) + amt;
       var nOld = 0, nCur = 0, nAdv = 0;
       yms.forEach(function(m) { if (m < ym) nOld++; else if (m === ym) nCur++; else nAdv++; });
       if (nOld) { t.back += each * nOld; t.backCount++; }
@@ -9884,11 +9891,13 @@ function feeTotals() {
 
 // 📊 this month's fee picture for a list of students: what should come in (sum of monthly fees),
 // what has come in for this month, and what is still due
+// a payment in cash / offline (older payments said "Offline (Cash)"); everything else is online
+function feeIsOffline(f) { return /off|cash/i.test(String((f && f.paymentMode) || '')); }
 function monthFeeSummary(stus, year, mKey) {
   var now = new Date();
   year = String(year || now.getFullYear());
   mKey = mKey || MONTH_KEYS[now.getMonth()];
-  var s = { expected: 0, collected: 0, due: 0, paidCount: 0, partialCount: 0, pendingCount: 0, dueCount: 0, total: 0, byId: {} };
+  var s = { expected: 0, collected: 0, due: 0, paidCount: 0, partialCount: 0, pendingCount: 0, dueCount: 0, total: 0, byId: {}, online: 0, offline: 0, recv: 0, recvOn: 0, recvOff: 0, recvCount: 0 };
   var fees = validFees(), want = year + '-' + mKey;
   (stus || []).forEach(function(u) {
     var fee = Number(u.monthlyFee || 0);
@@ -9900,6 +9909,7 @@ function monthFeeSummary(stus, year, mKey) {
       var yms = feeYms(f);
       if (yms.indexOf(want) === -1) return;
       got += Number(f.amountPaid || 0) / yms.length;
+      if (feeIsOffline(f)) s.offline += Number(f.amountPaid || 0) / yms.length; else s.online += Number(f.amountPaid || 0) / yms.length;
       bal = Math.max(bal, Number(f.dueBalance || 0));
     });
     got = Math.round(got);
@@ -9915,6 +9925,16 @@ function monthFeeSummary(stus, year, mKey) {
     s.byId[u.id] = { status: st, got: got, left: left };
   });
   s.due = Math.round(s.due);
+  s.online = Math.round(s.online); s.offline = Math.round(s.offline);
+  // 💰 the money that came IN during this calendar month (by date — any month's fee), online / offline
+  var ids = {};
+  (stus || []).forEach(function(u) { ids[u.id] = 1; });
+  fees.forEach(function(f) {
+    if (!ids[f.studentId] || String(f.paymentDate || '').slice(0, 7) !== want) return;
+    var a = Number(f.amountPaid || 0);
+    s.recv += a; s.recvCount++;
+    if (feeIsOffline(f)) s.recvOff += a; else s.recvOn += a;
+  });
   return s;
 }
 

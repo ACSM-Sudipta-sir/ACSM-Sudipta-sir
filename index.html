@@ -3411,7 +3411,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261118230249';
+var APP_BUILD = '20261118232112';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -9194,7 +9194,7 @@ function renderStuAiSettings() {
       (getAiKey() ? '<button type="button" class="btn btn-slate btn-sm" onclick="document.getElementById(\'sai-key\').value=getAiKey(); showToast(\'Your main Gemini key is filled in — press Save.\', \'success\');">Use my main Gemini key</button>' : '') +
       '<button type="button" class="btn btn-teal btn-sm" onclick="testStuAi()">🔌 Test</button> <span id="sai-test" style="font-size:0.8rem; color:var(--text-muted);"></span>' +
     '</div>' +
-    '<p style="font-size:0.74rem; color:#fcd34d; margin:10px 0 0 0;">⚠ This key is used from the students\' phones, so lock it to your website: Google Cloud Console → APIs &amp; Services → Credentials → the key → Application restrictions → <b>Websites</b> → add <b>https://YOUR-SITE.netlify.app/*</b> → API restrictions → <b>Generative Language API</b> → Save.</p>' +
+    '<p style="font-size:0.74rem; color:#fcd34d; margin:10px 0 0 0;">⚠ This key is used from the students\' phones, so lock it to your website: Google Cloud Console → APIs &amp; Services → Credentials → the key → Application restrictions → <b>Websites</b> → add <b>' + esc(location.origin) + '/*</b> (this website) → API restrictions → <b>Generative Language API</b> → Save.</p>' +
   '</details>';
 }
 function saveStuAi() {
@@ -16317,7 +16317,16 @@ async function geminiPost(key, payload) {
           last = new Error('Empty answer');
         } else {
           last = new Error('HTTP ' + res.status);
-          if (res.status === 400 || res.status === 401 || res.status === 403) throw last;   // wrong / blocked key
+          if (res.status === 400 || res.status === 401 || res.status === 403) {
+            // say clearly WHY (the most common: the key is locked to another website, e.g. the old Netlify address)
+            var why = '';
+            try { var ej = await res.json(); why = JSON.stringify(ej && ej.error || ej); } catch (e2) {}
+            if (/REFERRER|referer|referrer/i.test(why)) last = new Error('HTTP ' + res.status + ' — the key is locked to another website. Add ' + location.origin + '/* to the key in Google Cloud Console.');
+            else if (/API_KEY_INVALID|API key not valid/i.test(why)) last = new Error('HTTP ' + res.status + ' — this Gemini key is not valid (deleted or mistyped). Make a new key.');
+            else if (/SERVICE_DISABLED|has not been used|is disabled/i.test(why)) last = new Error('HTTP ' + res.status + ' — the Gemini API (Generative Language API) is switched off for this key.');
+            else if (/API_KEY_SERVICE_BLOCKED|blocked/i.test(why)) last = new Error('HTTP ' + res.status + ' — the key is not allowed to use the Gemini API (API restrictions).');
+            throw last;
+          }
           if (res.status === 404) break;                                                   // this model is gone → next
         }
       } catch (e) {

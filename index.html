@@ -363,6 +363,9 @@
       box-shadow: 0 -6px 24px rgba(0,0,0,0.45);
     }
     .bottom-nav-inner { display: flex; max-width: 560px; margin: 0 auto; }
+    #student-bottom-nav button { min-width: 0; font-size: 0.62rem; padding-left: 1px; padding-right: 1px; }
+    #student-bottom-nav button > span:nth-child(2) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #student-bottom-nav button .bn-ico { width: 34px; }
     .bottom-nav button {
       flex: 1; background: none; border: none; color: #94a3b8; cursor: pointer; position: relative;
       padding: 9px 4px 8px 4px; display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -1408,8 +1411,9 @@
       <button type="button" data-tab="home" onclick="setStudentTab('home')"><span class="bn-ico">🏠</span><span>Home</span><span class="nav-badge hidden" id="nav-home-badge">0</span></button>
       <button type="button" data-tab="notices" onclick="setStudentTab('notices')"><span class="bn-ico">📢</span><span>Notices</span><span class="nav-badge hidden" id="nav-notice-badge">0</span></button>
       <button type="button" data-tab="chat" onclick="setStudentTab('chat')"><span class="bn-ico">💬</span><span>Chat</span><span class="nav-badge hidden" id="nav-chat-stu-badge">0</span></button>
-      <button type="button" data-tab="books" onclick="setStudentTab('books')"><span class="bn-ico">📖</span><span>Books</span></button>
-      <button type="button" data-tab="about" onclick="setStudentTab('about')"><span class="bn-ico">🏫</span><span>About</span></button>
+      <button type="button" data-tab="tests" onclick="setStudentTab('tests')"><span class="bn-ico">📝</span><span>Tests</span><span class="nav-badge hidden" id="nav-test-badge">0</span></button>
+      <button type="button" data-tab="hw" onclick="setStudentTab('hw')"><span class="bn-ico">📒</span><span>Homework</span><span class="nav-badge hidden" id="nav-hw-badge">0</span></button>
+      <button type="button" data-tab="about" onclick="setStudentTab('about')"><span class="bn-ico"><img id="nav-about-logo" alt="" style="width:26px; height:26px; border-radius:50%; object-fit:cover; background:#fff;"></span><span>About</span></button>
       <button type="button" data-tab="fees" onclick="setStudentTab('fees')"><span class="bn-ico">💳</span><span>Fees</span><span class="nav-badge hidden" id="nav-fee-badge">0</span></button>
     </div>
   </nav>
@@ -3412,7 +3416,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261119184641';
+var APP_BUILD = '20261119185024';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -6556,12 +6560,20 @@ function updateStudentNav(unread) {
   navBadge('nav-notice-badge', studentTab === 'notices' ? 0 : unread);
   navBadge('nav-chat-stu-badge', studentTab === 'chat' ? 0 : chatUnreadStudent());
   navBadge('nav-fee-badge', studentTab === 'fees' ? 0 : feeNewCount());
-  var homeN = 0;
+  var homeN = 0, testN = 0, hwN = 0;
   try {
     var u = currentUser;
-    homeN = sdAssignedTests(u, u.studentClass || u.batch || 'Class 12').filter(function(t) { var k = studentExamStatus(t).key; return k === 'live' || k === 'open'; }).length + hwPendingCount(u);
+    testN = sdAssignedTests(u, u.studentClass || u.batch || 'Class 12').filter(function(t) { var k = studentExamStatus(t).key; return k === 'live' || k === 'open'; }).length;
+    hwN = hwPendingCount(u) + (hwCache && hwMineCache ? newCheckedForStudent().hw.length : 0);
+    homeN = testN + hwPendingCount(u);
   } catch (e) {}
   navBadge('nav-home-badge', studentTab === 'home' ? 0 : homeN);
+  // 🔴 blinking numbers: exams open now • homework / assessment to submit (or newly checked)
+  navBadge('nav-test-badge', testN);
+  navBadge('nav-hw-badge', studentTab === 'hw' ? 0 : hwN);
+  // 🏫 About = the institute's own logo
+  var lg = document.getElementById('nav-about-logo');
+  if (lg) { var src = Store.get(LOGO_KEY) || FALLBACK_LOGO; if (lg.getAttribute('src') !== src) lg.setAttribute('src', src); }
 }
 
 // 🔔 Exam Alert as a message: red (blinking) when an exam is open now, amber when one is coming
@@ -14163,6 +14175,8 @@ setInterval(function() {
   if (cloud.role !== 'student' || !currentUser || examState || document.hidden) return;
   stuLockTick++;
   if (!hwCache || stuLockTick % 10 === 0) loadHw(true); else checkStudentMissLock();
+  // 📝 an exam that opened just now: the red number on "Tests" appears without a reload
+  try { var u0 = currentUser; navBadge('nav-test-badge', sdAssignedTests(u0, u0.studentClass || u0.batch || 'Class 12').filter(function(t) { var k = studentExamStatus(t).key; return k === 'live' || k === 'open'; }).length); } catch (e) {}
 }, 60000);
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible' && cloud.role === 'student' && currentUser && !examState) setTimeout(function() { if (hwCache) checkStudentMissLock(); else loadHw(true); }, 800);

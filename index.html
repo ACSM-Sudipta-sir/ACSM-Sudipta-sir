@@ -3492,7 +3492,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261119223624';
+var APP_BUILD = '20261119224156';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -16988,6 +16988,30 @@ function gradeLabel(pct) {
   return pct >= 90 ? 'Excellent' : (pct >= 75 ? 'Very Good' : (pct >= 60 ? 'Good' : (pct >= 40 ? 'Satisfactory' : 'Needs Improvement')));
 }
 
+// 📵 answers after an exam: NO-SCREENSHOT rule for students
+//  • every answer card carries the student's own name + number across it (a forwarded screenshot shows who sent it)
+//  • answers / solutions stay closed: only ONE opens at a time, by touch, and it closes again by itself after 40 s
+//  • the screen blurs when the app is not in front, and printing is off (the student-portal guard)
+var ansOpenTimer = null;
+function ansWmCss(u) {
+  var label = ((u && u.fullName) || '') + ' • ' + ((u && u.id) || '') + ' • ACSM — DO NOT SHARE';
+  var x = String(label).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="440" height="170"><text x="20" y="100" transform="rotate(-14 220 85)" fill="rgba(255,255,255,0.16)" font-family="Arial, sans-serif" font-size="15" font-weight="700">' + x + '</text></svg>';
+  return 'background-image:url(&quot;data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg).replace(/'/g, '%27') + '&quot;); background-repeat:repeat;';
+}
+function ansToggle(n) {
+  var el = document.getElementById('ansx-' + n);
+  if (!el) return;
+  var wasOpen = !el.classList.contains('hidden');
+  document.querySelectorAll('.ans-x').forEach(function(b) { b.classList.add('hidden'); });
+  document.querySelectorAll('.ans-x-btn').forEach(function(b) { b.textContent = '👁 Show correct answer & solution'; });
+  if (ansOpenTimer) { clearTimeout(ansOpenTimer); ansOpenTimer = null; }
+  if (wasOpen) return;
+  el.classList.remove('hidden');
+  var btn = document.getElementById('ansx-btn-' + n); if (btn) btn.textContent = '🙈 Hide';
+  ansOpenTimer = setTimeout(function() { ansToggle(n); }, 40000);
+}
+
 function renderSubmissionResultScreen(sub) {
   var resBox = document.getElementById('result-content');
   var evals = sub.evaluations || [];
@@ -16995,20 +17019,28 @@ function renderSubmissionResultScreen(sub) {
   var anyPending = evals.some(function(e) { return e.pending; });
   var isAdmin = !!(currentUser && currentUser.role === 'admin');
   var paper = isPaperExam(DB.get(K.T).find(function(x) { return x.id === sub.testId; }));
+  var guard = !isAdmin;   // students: the no-screenshot rule
+  var wmCss = guard ? ansWmCss(currentUser) : '';
+  if (ansOpenTimer) { clearTimeout(ansOpenTimer); ansOpenTimer = null; }
 
   var detailsHtml = evals.map(function(ev) {
+    var ansHtml = '<div style="font-size:0.85rem; margin-bottom:6px; color:#34d399;">🎯 <b>Correct answer:</b> ' + mx(ev.directAnswer) + '</div>' +
+      (ev.explanation ? '<div style="font-size:0.8rem; color:#cbd5e1; background:#111827; padding:8px 10px; border-radius:8px; overflow-x:auto; white-space:pre-line;">💡 <b>Solution:</b> ' + mx(ev.explanation) + '</div>' : '');
+    if (guard) ansHtml =
+      '<button type="button" id="ansx-btn-' + ev.qNo + '" class="btn btn-teal btn-sm ans-x-btn" style="margin:2px 0 6px 0; touch-action:manipulation;" onclick="ansToggle(' + Number(ev.qNo) + ')">👁 Show correct answer &amp; solution</button>' +
+      '<div id="ansx-' + ev.qNo + '" class="ans-x hidden">' + ansHtml + '</div>';
     var col = ev.pending ? '#f59e0b' : (ev.isCorrect ? '#10b981' : '#ef4444');
     var label = ev.pending ? '⏳ Waiting for teacher’s review' : (ev.isCorrect ? '✓ Correct' : '✕ Incorrect');
     var badgeCss = ev.pending ? 'rgba(245,158,11,0.2); color:#fcd34d;' : (ev.isCorrect ? 'rgba(5,150,105,0.25); color:#6ee7b7;' : 'rgba(220,38,38,0.25); color:#fca5a5;');
-    return '<div style="background:#090d16; border:1px solid #1e293b; border-left:4px solid ' + col + '; border-radius:12px; padding:14px; margin-bottom:12px;">' +
+    return '<div style="position:relative; background:#090d16; border:1px solid #1e293b; border-left:4px solid ' + col + '; border-radius:12px; padding:14px; margin-bottom:12px;">' +
+      (guard ? '<div aria-hidden="true" style="position:absolute; inset:0; z-index:3; pointer-events:none; border-radius:12px; ' + wmCss + '"></div>' : '') +
       '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;">' +
         '<span style="font-weight:800; color:#fcd34d;">Question ' + ev.qNo + ' (' + esc(ev.format || 'MCQ') + ')' + (ev.difficulty ? ' ' + diffBadge(ev.difficulty) : '') + '</span>' +
         '<span class="badge" style="background:' + badgeCss + '">' + label + (ev.pending ? '' : ' (' + ev.awarded + ' / ' + ev.marks + ')') + '</span>' +
       '</div>' +
       '<div style="font-weight:600; color:#fff; margin-bottom:8px; overflow-x:auto;">' + mx(ev.questionText) + srcBadge(ev.source) + qImgTag({ id: ev.qid, hasImage: ev.hasImage }) + '</div>' +
       (paper ? '' : '<div style="font-size:0.83rem; margin-bottom:4px;">👤 <b>Your answer:</b> <span style="color:' + (ev.pending ? '#fcd34d' : (ev.isCorrect ? '#6ee7b7' : '#fca5a5')) + ';">' + mx(ev.studentAnswer) + '</span></div>') +
-      '<div style="font-size:0.85rem; margin-bottom:6px; color:#34d399;">🎯 <b>Correct answer:</b> ' + mx(ev.directAnswer) + '</div>' +
-      (ev.explanation ? '<div style="font-size:0.8rem; color:#cbd5e1; background:#111827; padding:8px 10px; border-radius:8px; overflow-x:auto; white-space:pre-line;">💡 <b>Solution:</b> ' + mx(ev.explanation) + '</div>' : '') +
+      ansHtml +
       (isAdmin ? '' : '<div id="cmpbox-' + ev.qNo + '">' + cmpStudentBox(sub, ev) + '</div>') +
     '</div>';
   }).join('');
@@ -17067,11 +17099,16 @@ function renderSubmissionResultScreen(sub) {
       '<div id="sol-locked" class="about-empty' + (paper && !isAdmin ? '' : ' hidden') + '" style="margin:0 0 12px 0;">🔒 Upload your answer sheet PDF above — the answers and full solutions will open right after that.</div>' +
       '<div id="sol-block" class="' + (paper && !isAdmin ? 'hidden' : '') + '">' +
         '<h3 style="margin:0 0 10px 0; font-size:1rem;">📋 Question-by-question answers &amp; solutions</h3>' +
+        (guard ? '<div style="border:2px solid #dc2626; background:rgba(127,29,29,0.35); border-radius:12px; padding:10px 12px; margin-bottom:12px; font-size:0.84rem; line-height:1.6; color:#fecaca;">' +
+          '<b style="color:#fff;">📵 RULE: NO SCREENSHOTS / PHOTOS OF THE ANSWERS</b><br>' +
+          'These answers are only for you. Do not take a screenshot or a photo and do not send them to anyone. Your <b>name and number are printed on every answer</b> — if a copy reaches another student, it shows it came from you, and your <b>result can be cancelled and your portal locked</b>.<br>' +
+          '<span style="color:#fde68a;">উত্তরের স্ক্রিনশট বা ছবি তোলা নিষেধ। প্রতিটি উত্তরে তোমার নাম ও নম্বর লেখা আছে — অন্য কারো কাছে গেলে বোঝা যাবে কে পাঠিয়েছে, তখন রেজাল্ট বাতিল ও পোর্টাল লক হতে পারে।</span><br>' +
+          '<span style="color:#cbd5e1;">Touch 👁 to see one answer at a time (it closes again after 40 seconds).</span></div>' : '') +
         detailsHtml +
       '</div>' +
       '<div style="display:flex; justify-content:space-between; margin-top:16px; gap:8px; flex-wrap:wrap;">' +
         '<button type="button" onclick="showScreen(\'' + backTarget + '\')" class="btn btn-slate">◀ Back to Portal</button>' +
-        '<button type="button" onclick="window.print()" class="btn btn-amber">🖨️ Print / Save Scorecard PDF</button>' +
+        (guard ? '' : '<button type="button" onclick="window.print()" class="btn btn-amber">🖨️ Print / Save Scorecard PDF</button>') +
       '</div>' +
     '</div>';
   setTimeout(function() { renderMath(resBox); hydrateQImages(resBox); }, 40);

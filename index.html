@@ -543,6 +543,14 @@
     .btn { transition: transform .18s cubic-bezier(.34,1.56,.64,1), box-shadow .18s, background .15s, opacity .15s, filter .15s; }
     .btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(0,0,0,0.42); }
     .btn:active:not(:disabled) { transform: translateY(0) scale(0.96); box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
+    /* 👆 one-touch exam buttons (Start / Submit): no movement, no animation — they react on the first touch, even on old phones */
+    .tap-btn { display: block; margin: 0 auto; min-width: 190px; min-height: 52px; padding: 12px 26px; border: 0; border-radius: 14px; font: 800 1.08rem/1.2 system-ui, sans-serif; color: #fff; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: rgba(255,255,255,0.25); transition: none !important; animation: none !important; transform: none !important; position: relative; z-index: 5; -webkit-user-select: none; user-select: none; }
+    .tap-btn.red { background: #dc2626; box-shadow: 0 4px 0 #7f1d1d; }
+    .tap-btn.green { background: #059669; box-shadow: 0 4px 0 #065f46; }
+    .tap-btn.wait { background: #b45309; box-shadow: 0 4px 0 #78350f; }
+    .tap-btn:active { filter: brightness(0.85); }
+    .tap-btn:disabled { opacity: 0.6; }
+    .tap-btn * { pointer-events: none; }
     .pop-now { animation: popFwd .42s cubic-bezier(.34,1.56,.64,1); z-index: 2; }
     .side-nav .btn { position: relative; }
     .side-nav .btn:hover { transform: translateX(4px) scale(1.02); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }
@@ -1433,7 +1441,7 @@
 
 <!-- 7. ACTIVE EXAM -->
 <section id="view-exam" class="view-section">
-  <div style="background:#0f172a; border-bottom:2px solid var(--red-main); padding:10px 16px; position:-webkit-sticky; position:sticky; top:73px; z-index:30;">
+  <div id="exam-bar" style="background:#0f172a; border-bottom:2px solid var(--red-main); padding:10px 16px; position:-webkit-sticky; position:sticky; top:73px; z-index:45;">
     <div style="max-width:1380px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
       <div>
         <div id="active-exam-title" style="font-weight:800; font-size:0.95rem;">Exam</div>
@@ -1444,7 +1452,7 @@
       </div>
       <div style="display:flex; align-items:center; gap:10px;">
         <div id="exam-timer" style="font-family:monospace; font-size:1.25rem; font-weight:900; background:#090d16; color:#f87171; padding:6px 14px; border-radius:10px; border:1px solid var(--red-main);">20:00</div>
-        <button type="button" onclick="confirmFinishExam()" class="btn btn-green" style="padding:8px 14px; font-size:0.8rem;">✅ Submit Exam</button>
+        <button type="button" data-tap="submit" class="tap-btn green" style="min-width:0; min-height:44px; padding:8px 16px; font-size:0.95rem; margin:0;">✅ SUBMIT</button>
       </div>
     </div>
   </div>
@@ -1454,7 +1462,7 @@
       <div style="font-size:0.85rem; font-weight:800; margin-bottom:4px;">Question Palette</div>
       <div style="font-size:0.73rem; color:var(--text-muted); margin-bottom:8px;">Tap a number to jump to that question.</div>
       <div id="exam-palette-grid" class="pal-grid"></div>
-      <button type="button" onclick="confirmFinishExam()" class="btn btn-green btn-block" style="margin-top:16px;">✅ Finish &amp; Submit</button>
+
     </aside>
   </div>
 </section>
@@ -1508,6 +1516,66 @@ function copyTextSafe(text, successMessage) {
     showToast('Could not auto-copy. Please select and copy manually.', 'error');
   }
   document.body.removeChild(ta);
+}
+
+// 👆 ONE-TOUCH buttons (exam Start / Submit): they act on the finger lifting (touchend), not only on "click" —
+// some phones lose the click when the finger moves a tiny bit or the page redraws. A button carries
+// data-tap="action" (and data-id); the click that follows a touch is ignored, so nothing runs twice.
+var tapAct = { x: 0, y: 0, el: null, ranAt: 0, ranEl: null };
+function tapRun(el) {
+  if (!el || el.disabled) return;
+  var a = el.getAttribute('data-tap'), id = el.getAttribute('data-id') || '';
+  tapAct.ranAt = Date.now(); tapAct.ranEl = el;
+  if (a === 'start') openExamConsent(id, true);
+  else if (a === 'go') launchActiveExam();
+  else if (a === 'submit') examSubmitTap(el);
+}
+document.addEventListener('touchstart', function(e) {
+  var el = e.target && e.target.closest ? e.target.closest('[data-tap]') : null;
+  tapAct.el = el;
+  if (el && e.touches && e.touches[0]) { tapAct.x = e.touches[0].clientX; tapAct.y = e.touches[0].clientY; }
+}, { capture: true, passive: true });
+document.addEventListener('touchend', function(e) {
+  var el = tapAct.el; tapAct.el = null;
+  if (!el) return;
+  var t = e.changedTouches && e.changedTouches[0];
+  if (t && (Math.abs(t.clientX - tapAct.x) > 18 || Math.abs(t.clientY - tapAct.y) > 18)) return;   // it was a scroll
+  if (e.cancelable) e.preventDefault();   // no second (late) click
+  tapRun(el);
+}, { capture: true, passive: false });
+document.addEventListener('click', function(e) {
+  var el = e.target && e.target.closest ? e.target.closest('[data-tap]') : null;
+  if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  if (tapAct.ranEl === el && Date.now() - tapAct.ranAt < 900) return;   // the touch already did it
+  tapRun(el);
+}, true);
+
+// ✅ Submit with ONE touch: the exam is sent 3 seconds later; touching the same button again in
+// those 3 seconds cancels it (so a wrong touch does not end the exam)
+var examSubmitTimer = null;
+function examSubmitTap(el) {
+  if (!examState) return;
+  var all = function() { return Array.prototype.slice.call(document.querySelectorAll('[data-tap="submit"]')); };
+  if (examSubmitTimer) {
+    clearInterval(examSubmitTimer); examSubmitTimer = null;
+    all().forEach(function(b) { b.className = 'tap-btn green'; b.textContent = '✅ SUBMIT'; });
+    showToast('Submit cancelled — continue your exam.');
+    return;
+  }
+  var n = 3;
+  var show = function() { all().forEach(function(b) { b.className = 'tap-btn wait'; b.textContent = '⏳ Submitting in ' + n + '… (touch to cancel)'; }); };
+  show();
+  examSubmitTimer = setInterval(function() {
+    if (!examState) { clearInterval(examSubmitTimer); examSubmitTimer = null; return; }   // already submitted (time over)
+    n--;
+    if (n > 0) { show(); return; }
+    clearInterval(examSubmitTimer); examSubmitTimer = null;
+    all().forEach(function(b) { b.disabled = true; b.textContent = '⏳ Submitting…'; });
+    // if the submit did not get through (no internet), the button can be touched again after 20 s
+    setTimeout(function() { if (examState && !examSubmitTimer) all().forEach(function(b) { b.disabled = false; b.className = 'tap-btn green'; b.textContent = '✅ SUBMIT'; }); }, 20000);
+    finishExamNow('manual');
+  }, 1000);
 }
 
 function closeModal() {
@@ -3424,7 +3492,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261119205710';
+var APP_BUILD = '20261119223624';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -6821,6 +6889,9 @@ function updateExamTimerDisplay() {
 
 function renderCurrentExamQuestion() {
   if (!examState) return;
+  try { var hb = document.querySelector('.top-header'), eb = document.getElementById('exam-bar'); if (hb && eb) eb.style.top = (hb.offsetHeight || 0) + 'px'; } catch (e) {}
+  // the top ✅ SUBMIT button is ready again for this exam (unless a submit countdown is running)
+  if (!examSubmitTimer) document.querySelectorAll('#exam-bar [data-tap="submit"]').forEach(function(b) { b.disabled = false; b.className = 'tap-btn green'; b.textContent = '✅ SUBMIT'; });
   var qs = examState.questions || [];
   var idx = examState.qIndex;
   var q = qs[idx];
@@ -6872,7 +6943,7 @@ function renderCurrentExamQuestion() {
         '<button type="button" class="btn btn-slate" ' + (idx === 0 ? 'disabled' : '') + ' onclick="examState.qIndex--; renderCurrentExamQuestion();">◀ Previous</button>' +
         (idx < qs.length - 1
           ? '<button type="button" class="btn btn-amber" onclick="examState.qIndex++; renderCurrentExamQuestion();">Next Question ▶</button>'
-          : '<button type="button" class="btn btn-green" onclick="confirmFinishExam()">✅ Submit Exam</button>') +
+          : '<button type="button" data-tap="submit" class="tap-btn green" style="margin:0;">✅ SUBMIT</button>') +
       '</div>' +
     '</div>';
 
@@ -13150,7 +13221,7 @@ function studentExamCardHtml(t) {
         (isPaperExam(t) && pend && !sub.sheetReport ? ' — <span style="color:#fcd34d;">marks after the teacher checks your answer sheet</span>' : ' — Score: <b>' + sub.score + ' / ' + sub.maxScore + '</b>' + (pend ? ' <span style="color:#fcd34d;">(written part will be reviewed)</span>' : '')) + '</div>' +
       '<button type="button" onclick="viewSubmissionDetail(\'' + escA(sub.id) + '\')" class="btn ' + (paperUpload ? 'btn-purple' : 'btn-teal') + ' btn-block">' + (paperUpload ? '📤 Upload Answer Sheet / Solutions' : '📊 View Result &amp; Solutions') + '</button>';
   } else if (s.key === 'live' || s.key === 'open') {
-    action = '<button type="button" onclick="openExamConsent(\'' + escA(t.id) + '\')" class="btn btn-red btn-block"><span class="live-dot"></span>▶ Start Exam — Live now</button>' +
+    action = '<button type="button" data-tap="start" data-id="' + escA(t.id) + '" class="tap-btn red">▶ START EXAM</button>' +
       '<div style="font-size:0.74rem; color:var(--text-muted); margin-top:6px; text-align:center;">One attempt only' + (t.endAtMs ? ' • window closes in ' + minsLeftText(t.endAtMs - Date.now()) : '') + '</div>';
   } else if (s.key === 'upcoming') {
     action = '<button type="button" class="btn btn-slate btn-block" disabled>⏳ Opens ' + fmtDateTime(t.startAtMs) + '</button>';
@@ -16161,9 +16232,10 @@ function prepareStudentPersonalizedQuestions(testObj) {
 }
 
 // ---------------- consent screen ----------------
-function openExamConsent(testId) {
+function openExamConsent(testId, fromCard) {
   var t = DB.get(K.T).find(function(x) { return x.id === testId; });
   if (!t) return;
+  if (examState || examStarting) return;
   var s = studentExamStatus(t);
   if (s.key === 'done') { showToast('You have already completed this exam.', 'error'); return; }
   if (s.key === 'finishing') {
@@ -16178,6 +16250,8 @@ function openExamConsent(testId) {
   if (s.key === 'upcoming') { showToast('This exam opens on ' + fmtDateTime(t.startAtMs) + '.', 'error'); return; }
   if (s.key === 'closed') { showToast('This exam is closed.', 'error'); return; }
   currentTest = t;
+  // notebook (subjective) exams have no camera: the one touch on ▶ START EXAM starts the exam at once
+  if (fromCard && isPaperExam(t)) { showToast('⏳ Starting your exam…'); launchActiveExam(); return; }
   showScreen('view-consent');
   var qCnt = Math.min((t.questions || []).length, Number(t.questionsPerStudent || (t.questions || []).length));
   var modeDesc = t.examFormatMode === 'Subjective' ? 'Subjective — write the solutions in your notebook; after you submit, upload them as ONE PDF (keep a scanner app ready)'
@@ -16203,7 +16277,7 @@ function openExamConsent(testId) {
         '<label class="col-pill" style="cursor:pointer; display:flex; margin-bottom:14px;"><input type="checkbox" id="consent-agree" checked onchange="document.getElementById(\'start-exam-btn\').disabled = !this.checked"> <span>I have read this and I am ready with my notebook and pen.</span></label>' +
         '<div style="display:flex; gap:10px;">' +
           '<button type="button" onclick="showScreen(\'view-student-dash\')" class="btn btn-slate">◀ Back</button>' +
-          '<button type="button" id="start-exam-btn" onclick="launchActiveExam()" class="btn btn-red btn-block" style="padding:14px; font-size:1.05rem;">🚀 Start Exam</button>' +
+          '<button type="button" id="start-exam-btn" data-tap="go" class="tap-btn red" style="flex:1;">🚀 START EXAM</button>' +
         '</div>' +
         '<div id="start-exam-note" style="font-size:0.76rem; color:var(--text-muted); text-align:center; margin-top:8px;">By pressing Start you agree to the points above.</div>' +
       '</div>'
@@ -16218,7 +16292,7 @@ function openExamConsent(testId) {
       '<label class="col-pill" style="cursor:pointer; display:flex; margin-bottom:14px;"><input type="checkbox" id="consent-agree" checked onchange="document.getElementById(\'start-exam-btn\').disabled = !this.checked"> <span>I have read the rules, I (and my parent / guardian) agree to the camera recording.</span></label>' +
       '<div style="display:flex; gap:10px;">' +
         '<button type="button" onclick="showScreen(\'view-student-dash\')" class="btn btn-slate">◀ Back</button>' +
-        '<button type="button" id="start-exam-btn" onclick="launchActiveExam()" class="btn btn-red btn-block" style="padding:14px; font-size:1.05rem;">🚀 Start Exam (camera will turn on)</button>' +
+        '<button type="button" id="start-exam-btn" data-tap="go" class="tap-btn red" style="flex:1;">🚀 START EXAM</button>' +
       '</div>' +
       '<div id="start-exam-note" style="font-size:0.76rem; color:var(--text-muted); text-align:center; margin-top:8px;">By pressing Start you agree to the rules above. When the phone asks, press <b>Allow</b> for the camera.</div>' +
     '</div>');
@@ -16474,7 +16548,7 @@ async function launchActiveExam() {
   if (btn) btn.disabled = true;
   // subjective (notebook) exams are relaxed: no camera, no full screen, no warnings — the screen just stays on
   var relaxed = isPaperExam(t);
-  var reenable = function() { examStarting = false; if (btn) { btn.disabled = false; btn.textContent = relaxed ? '🚀 Start Exam' : '🚀 Start Exam (camera will turn on)'; } };
+  var reenable = function() { examStarting = false; if (btn) { btn.disabled = false; btn.textContent = '🚀 START EXAM'; } };
   var stream = null;
   var stopStream = function() {
     if (stream) stream.getTracks().forEach(function(tr) { tr.stop(); });

@@ -712,7 +712,7 @@
     .qp-opt.ok { background: #dcfce7; border-color: #22c55e; color: #14532d; }
     .qp-tick { color: #16a34a; font-weight: 900; }
     .qp-ans { margin-top: 10px; font-size: calc(var(--qp) * 0.92); color: #4c1d95; }
-    .qp-sol { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #f1f5f9; border-left: 4px solid #94a3b8; font-size: calc(var(--qp) * 0.88); line-height: 1.7; color: #334155; word-break: break-word; }
+    .qp-sol { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #f1f5f9; border-left: 4px solid #94a3b8; font-size: calc(var(--qp) * 0.88); line-height: 1.7; color: #334155; word-break: break-word; white-space: pre-line; }
     .qp-sol-h { font-weight: 800; color: #475569; margin-bottom: 2px; font-size: 0.82em; }
     .q-paper .katex { color: inherit; }
     .hdr-greet { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; color: #fff; font-size: 0.8rem; white-space: nowrap; background: linear-gradient(135deg, var(--c1, #6366f1), var(--c2, #7c3aed)); box-shadow: 0 4px 14px rgba(0,0,0,0.35); animation: hpPop .45s cubic-bezier(.34,1.56,.64,1); }
@@ -3416,7 +3416,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261119185024';
+var APP_BUILD = '20261119185520';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -10822,7 +10822,7 @@ function buildAIPromptString() {
     '   - "options": exactly 4 options, and "correct": the index (0, 1, 2 or 3) of the right option (0 = A, 1 = B, 2 = C, 3 = D). If the source question is not an MCQ, write 3 believable wrong options yourself.\n' +
     '   - ANSWER KEY CHECK (very important): solve every question yourself FIRST. "correct" MUST be the index of the option that is EQUAL to the final answer of your own solution, and "answerText" must be that same option. If you shuffle the options, count the index again afterwards (A = 0). The last line of the "explanation" must end with "= <the value of that option>". Never give a key that disagrees with the solution.\n' +
     '   - "answerText": the short final answer.\n' +
-    '   - "explanation": the complete step-by-step solution.\n' +
+    '   - "explanation": a DETAILED step-by-step solution that even a weak student can follow alone: start with the idea / formula to use and why; then "Step 1: … Step 2: …" with every substitution and every simplification line written out (no skipped jumps); name the rule used in each step (e.g. "using a² − b² = (a − b)(a + b)"); end with "∴ Answer: … (option X)". For an MCQ add one line on why a tempting wrong option is wrong. Put each step on its own line (\\n between steps).\n' +
     (inputQState.chapter
       ? '3. "chapter": all these questions are from the chapter "' + inputQState.chapter + '" — write exactly this name.\n'
       : '3. "chapter": the chapter name. Use exactly the same spelling for every question of that chapter.\n') +
@@ -10847,7 +10847,7 @@ function buildAIPromptString() {
     '    "options": ["x = 1, 6", "x = 2, 3", "x = -2, -3", "x = 1, 5"],\n' +
     '    "correct": 1,\n' +
     '    "answerText": "x = 2 or x = 3",\n' +
-    '    "explanation": "Factorise: (x - 2)(x - 3) = 0, so x = 2 or x = 3.",\n' +
+    '    "explanation": "Idea: the quadratic factorises easily.\\nStep 1: two numbers with product 6 and sum −5 are −2 and −3.\\nStep 2: so x² − 5x + 6 = (x − 2)(x − 3).\\nStep 3: (x − 2)(x − 3) = 0 ⇒ x − 2 = 0 or x − 3 = 0.\\n∴ Answer: x = 2 or x = 3.",\n' +
     '    "hasFigure": false,\n' +
     '    "figureNote": "",\n' +
     '    "figurePage": 0\n' +
@@ -11114,7 +11114,7 @@ function aiDupPrompt(items) {
     'If you are not sure, answer NOT the same (empty "sameAs").\n' +
     'Reply with ONLY a JSON array: [{"id":"n1","sameAs":"<candidate id or empty string>","reason":"few words"}]\n\nITEMS:\n' + JSON.stringify(items, null, 1);
 }
-async function aiDupCheckPreview() {
+async function aiDupCheckPreview(quiet) {
   var list = inputQState.validatedPreview || [];
   var bank = DB.get(K.QB).filter(function(q) { return (q.partition || 'Class 12') === inputQState.targetClass; }).map(dupEntry);
   var items = [], cand = {};
@@ -11129,8 +11129,8 @@ async function aiDupCheckPreview() {
     var cs = top.map(function(x, k) { var cid = 'c' + i + '_' + k; cand[cid] = x.b; return { id: cid, question: plainText(x.b.text || '').slice(0, 350) }; });
     items.push({ id: 'n' + i, question: plainText(q.text || '').slice(0, 350), candidates: cs });
   });
-  if (!items.length) { showToast('Nothing to check — no new question looks like one you already have.', 'success'); return; }
-  if (!getAiKey()) { showToast('No AI key — the normal check above is still done.', 'error'); return; }
+  if (!items.length) { if (!quiet) showToast('Nothing to check — no new question looks like one you already have.', 'success'); return; }
+  if (!getAiKey()) { if (!quiet) showToast('No AI key — the normal check above is still done.', 'error'); return; }
   var btn = document.getElementById('ai-dup-btn');
   if (btn) { btn.disabled = true; btn.textContent = '🤖 Checking…'; }
   var found = 0;
@@ -11157,7 +11157,8 @@ function aiKeyPrompt(items) {
   return 'You are a very careful mathematics examiner checking an answer key before it goes to students.\n' +
     'For EACH question below: solve it yourself completely and carefully (do not trust the given answer). Then compare.\n' +
     'Reply with ONLY a JSON array, one object per question:\n' +
-    '[{"id":"q3","answer":"your own final answer, short","right":2,"keyOk":false,"solutionOk":true,"questionOk":true,"why":"short reason"}]\n' +
+    '[{"id":"q3","answer":"your own final answer, short","right":2,"keyOk":false,"solutionOk":true,"questionOk":true,"problem":"none","why":"short reason"}]\n' +
+    '- "problem": "none" | "wrong" (the question has an error / impossible) | "incomplete" (data, a figure or a part is missing) | "doubtful" (unclear wording, two options could be right, or you are not sure).\n' +
     '- "right": index (0 = A, 1 = B, 2 = C, 3 = D) of the option that equals YOUR answer; -1 if no option is correct; null if the question has no options.\n' +
     '- "keyOk": true only if "right" equals the given "marked" index.\n' +
     '- "solutionOk": false if the given solution has a mistake or ends with a different value.\n' +
@@ -11188,8 +11189,10 @@ async function aiKeyCheckPreview(auto) {
       var right = r.right === null || r.right === undefined || r.right === '' ? null : Number(r.right);
       var hasOpts = q.options && q.options.length >= 2;
       var keyOk = !hasOpts || (right !== null && right === Number(q.correct || 0));
-      q._ai = { ok: keyOk && r.solutionOk !== false && r.questionOk !== false, k: hasOpts && right !== null && right >= 0 && right < q.options.length ? right : null,
-        none: hasOpts && right === -1, ans: String(r.answer || '').slice(0, 120), sol: r.solutionOk !== false, qok: r.questionOk !== false, why: String(r.why || '').slice(0, 200) };
+      var prob = /incomplete/i.test(r.problem) ? 'incomplete' : (/doubt|unsure|unclear/i.test(r.problem) ? 'doubtful' : (/wrong|error|impossible/i.test(r.problem) ? 'wrong' : 'none'));
+      if (r.questionOk === false && prob === 'none') prob = 'wrong';
+      q._ai = { ok: keyOk && r.solutionOk !== false && prob === 'none', k: hasOpts && right !== null && right >= 0 && right < q.options.length ? right : null,
+        none: hasOpts && right === -1, ans: String(r.answer || '').slice(0, 120), sol: r.solutionOk !== false, qok: prob === 'none', prob: prob, why: String(r.why || '').slice(0, 200) };
       done++;
       if (!q._ai.ok) bad++;
     });
@@ -11206,6 +11209,8 @@ async function aiKeyCheckPreview(auto) {
   var ta = document.getElementById('inputq-json-textarea');
   if (ta) inputQState.jsonText = ta.value;
   renderAdminInputQuestionContent();
+  // 🔁 then, by itself: the AI looks for copies of questions you already have (other words, same question)
+  if (auto) setTimeout(function() { aiDupCheckPreview(true); }, 400);
 }
 // the AI says another option is right → use it (one question, or all)
 function setPreviewCorrect(i, k) {
@@ -11241,7 +11246,10 @@ function aiKeyBoxHtml(q, i) {
   if (a.k !== null && a.k !== Number(q.correct || 0)) lines.push('The right option is <b>' + L(a.k) + ') ' + mx(q.options[a.k]) + '</b>, but <b>' + L(Number(q.correct || 0)) + '</b> is marked. <button type="button" class="btn btn-amber btn-xs" onclick="setPreviewCorrect(' + i + ', ' + a.k + ')">✔ Make ' + L(a.k) + ' correct</button>');
   if (a.none) lines.push('<b>None of the options</b> is correct — fix the options (✏️ in the JSON) or remove this question.');
   if (!a.sol) lines.push('The <b>solution</b> has a mistake / ends with another value.');
-  if (!a.qok) lines.push('The <b>question</b> itself looks wrong or incomplete.');
+  if (a.prob === 'wrong') lines.push('❌ The <b>question itself is wrong</b> (an error in it / impossible) — fix it or ✕ remove it.');
+  else if (a.prob === 'incomplete') lines.push('🧩 The question is <b>incomplete</b> (data, a figure or a part is missing).');
+  else if (a.prob === 'doubtful') lines.push('❓ <b>Doubtful</b> — unclear wording or two options could be right. Read it once yourself.');
+  else if (!a.qok) lines.push('The <b>question</b> itself looks wrong or incomplete.');
   return '<div style="margin-top:6px; padding:7px 9px; border-radius:8px; background:rgba(220,38,38,0.14); border:2px solid #dc2626; font-size:0.8rem; color:#fecaca;">' +
     '🤖 <b>AI check — please look:</b> AI\'s answer: <b>' + mx(a.ans) + '</b>' + (a.why ? ' — ' + esc(a.why) : '') +
     '<ul style="margin:4px 0 0 18px; padding:0; line-height:1.6;">' + lines.map(function(l) { return '<li>' + l + '</li>'; }).join('') + '</ul></div>';
@@ -11267,6 +11275,7 @@ function checkInputJson() {
     markDuplicates(list, inputQState.targetClass);
     if (!list.length) throw new Error('No questions found in the JSON.');
     inputQState.validatedPreview = list;
+    inputQState.onlyFlag = false;
     renderAdminInputQuestionContent();
     var bad = list.filter(function(q) { return q._error; }).length;
     var dupN = list.filter(function(q) { return q._dup; }).length;
@@ -11329,7 +11338,11 @@ function renderAdminInputQuestionContent() {
     var chap = {};
     good.forEach(function(q) { var c = chapterOf(q); chap[c] = (chap[c] || 0) + 1; });
     var chips = Object.keys(chap).map(function(c) { return '<span class="chip">' + esc(c) + ' • ' + chap[c] + '</span>'; }).join('');
+    // 🔎 "only the questions with a problem" — the AI's findings, copies, errors
+    var flagged = function(q) { return !!(q._error || q._dup || q._maybe || (q._ai && !q._ai.ok)); };
+    var nFlag = prev.filter(flagged).length;
     var rows = prev.map(function(q, i) {
+      if (inputQState.onlyFlag && !flagged(q)) return '';
       var d = q._dup;
       var tag = q._error ? '<span class="badge badge-hard">Problem</span>'
         : (d && !q._force ? '<span class="badge" style="background:#7f1d1d; color:#fecaca;">⏭ Skipped — ' + ({ same: 'already in bank', similar: d.pct + '% same as one in bank', numbers: 'same numbers & task as one in bank', ai: '🤖 AI: same question already stored', marked: 'you marked it as a copy', twice: 'repeated (same as #' + d.no + ')' }[d.kind] || 'copy') + '</span>'
@@ -11384,6 +11397,19 @@ function renderAdminInputQuestionContent() {
           '<button type="button" onclick="clearInputPreview()" class="btn btn-slate btn-sm">Clear</button>' +
         '</div>' +
         (prev.some(function(q) { return q._maybe && !q._dup; }) ? '<p style="margin:0 0 10px 0; font-size:0.8rem; color:#fef08a;">⚠ ' + prev.filter(function(q) { return q._maybe && !q._dup; }).length + ' question(s) look similar to ones you have — tick “Same question — skip it”, or press 🤖 AI check for copies.</p>' : '') +
+        // the AI's findings in numbers, and a switch to see only those questions
+        (function() {
+          var a = prev.filter(function(q) { return q._ai; });
+          var cnt = function(fn) { return a.filter(fn).length; };
+          var nKey = cnt(function(q) { return q._ai.k !== null && q._ai.k !== Number(q.correct || 0); }), nWrong = cnt(function(q) { return q._ai.prob === 'wrong'; }),
+            nInc = cnt(function(q) { return q._ai.prob === 'incomplete'; }), nDoubt = cnt(function(q) { return q._ai.prob === 'doubtful'; }), nSol = cnt(function(q) { return !q._ai.sol; }),
+            nDup = prev.filter(function(q) { return q._dup && !q._force; }).length;
+          var chip = function(n, txt, col) { return n ? '<span class="chip" style="border-color:' + col + '; color:' + col + ';">' + txt + ' • ' + n + '</span>' : ''; };
+          return '<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:0 0 10px 0;">' +
+            chip(nKey, '🔑 wrong answer key', '#f87171') + chip(nWrong, '❌ wrong question', '#f87171') + chip(nInc, '🧩 incomplete', '#fbbf24') + chip(nDoubt, '❓ doubtful', '#fbbf24') + chip(nSol, '📝 solution mistake', '#fbbf24') + chip(nDup, '⏭ copy / repeated', '#fca5a5') +
+            (nFlag ? '<button type="button" class="btn btn-sm ' + (inputQState.onlyFlag ? 'btn-amber' : 'btn-slate') + '" onclick="var t=document.getElementById(\'inputq-json-textarea\'); if(t) inputQState.jsonText=t.value; inputQState.onlyFlag=!inputQState.onlyFlag; renderAdminInputQuestionContent()">' + (inputQState.onlyFlag ? '👁 Show all ' + prev.length + ' questions' : '🔎 Show only the ' + nFlag + ' question(s) with a problem') + '</button>' : (a.length ? '<span style="color:#86efac; font-size:0.84rem;">✅ No problem found in any question.</span>' : '')) +
+          '</div>';
+        })() +
         // bigger / smaller letters (remembered on this computer)
         '<div style="display:flex; align-items:center; gap:6px; justify-content:flex-end; margin:0 0 8px 0; font-size:0.8rem; color:var(--text-muted);">Letter size <button type="button" class="btn btn-slate btn-xs" onclick="qpZoom(-1)">A−</button><button type="button" class="btn btn-slate btn-xs" onclick="qpZoom(1)">A+</button></div>' +
         '<div class="qp-list" id="qp-list" style="--qp:' + qpSize() + 'rem;">' + rows + '</div>' +

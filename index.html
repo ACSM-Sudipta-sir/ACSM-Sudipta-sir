@@ -3412,7 +3412,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261119183613';
+var APP_BUILD = '20261119184641';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -14594,7 +14594,9 @@ function renderHwDetail() {
         '</div>' +
         '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">' +
           '<button type="button" id="hw-zip-btn" class="btn btn-blue btn-sm" onclick="hwDownloadZip()">⬇️ Download ZIP (' + (hwSelectedPhones().length ? hwSelectedPhones().length + ' selected' : 'all ' + Object.keys(d.subs).length + ' sheets') + ')</button>' +
-          '<button type="button" class="btn btn-purple btn-sm" onclick="hwCopyPrompt()">🤖 Copy AI prompt</button>' +
+          '<button type="button" class="btn btn-purple btn-sm" onclick="hwCopyPrompt()">🤖 Copy AI prompt (Gemini / Claude)</button>' +
+          '<a class="btn btn-slate btn-sm" style="color:#fff;" target="_blank" rel="noopener" href="https://gemini.google.com/app">🔗 Open Gemini</a>' +
+          '<a class="btn btn-slate btn-sm" style="color:#fff;" target="_blank" rel="noopener" href="https://claude.ai/new">🔗 Open Claude</a>' +
           '<button type="button" class="btn btn-green btn-sm" onclick="openHwPasteModal()">📥 Paste AI feedback (JSON)</button>' +
           (Object.keys(d.fb).length ? '<button type="button" class="btn btn-blue btn-sm" onclick="hwFeedbackPdf()">📄 Feedback PDF (all ' + Object.keys(d.fb).length + ')</button>' : '') +
           (hwOverdue(t) ? '<button type="button" class="btn btn-red btn-sm" onclick="hwRemarkMissing()">📝 Remark for not submitted</button>' : '') +
@@ -17396,7 +17398,7 @@ function examByHandPanel(test, subs, metas) {
     '<div style="font-size:0.8rem; margin-bottom:8px;">' + (q.length ? '<b style="color:#fcd34d;">' + q.length + '</b> sheet(s) waiting' + (q.length > n ? ' — this round: ' + n : '') : '<span style="color:#86efac;">✅ All uploaded sheets are checked.</span>') + '</div>' +
     '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
       '<button type="button" id="ex-zip-btn" class="btn btn-blue btn-sm" onclick="examDownloadZip(\'' + escA(test.id) + '\')"' + (n ? '' : ' disabled') + '>⬇️ Download ' + n + ' sheet(s) (ZIP)</button>' +
-      '<button type="button" class="btn btn-purple btn-sm" onclick="examCopyPrompt(\'' + escA(test.id) + '\')"' + (n ? '' : ' disabled') + '>📋 Copy prompt</button>' +
+      '<button type="button" class="btn btn-purple btn-sm" onclick="examCopyPrompt(\'' + escA(test.id) + '\')"' + (n ? '' : ' disabled') + '>📋 Copy prompt (Gemini / Claude)</button><a class="btn btn-slate btn-sm" style="color:#fff;" target="_blank" rel="noopener" href="https://gemini.google.com/app">🔗 Gemini</a><a class="btn btn-slate btn-sm" style="color:#fff;" target="_blank" rel="noopener" href="https://claude.ai/new">🔗 Claude</a>' +
       '<button type="button" class="btn btn-green btn-sm" onclick="openExamPaste(\'' + escA(test.id) + '\')">📥 Paste reply (JSON)</button>' +
     '</div>' +
     // 🔁 re-check: every uploaded sheet again (also the checked ones) — for a second look or another checker

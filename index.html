@@ -2358,6 +2358,9 @@ window.onCloudSetting = function(id, data, pending) {
     cloud.missCfg = d.missRule || null;     // 🔒 miss lock + 🏅 grade / redo rule
     cloud.wishCfg = d.wishes || null;       // 🎉 special-day wishes
     cloud.pushCfg = d.push || null;         // 🔔 notifications while the app is closed
+    // ⏰ the teacher saved / changed a homework (e.g. a new closing time): read the homework list again now
+    if (d.hwVer && cloud.hwVer && d.hwVer !== cloud.hwVer && !pending) setTimeout(function() { loadHw(true); }, 300);
+    cloud.hwVer = d.hwVer || cloud.hwVer || 1;
     if (cloud.role === 'student') setTimeout(function() { pushRegister(false); }, 5000);
     try { localStorage.setItem(QUICK_KEY, cloud.quickOpen ? '1' : '0'); } catch (e) {}
   } else if (id === 'aikey') {
@@ -3492,7 +3495,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261119224156';
+var APP_BUILD = '20261119234233';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -14274,7 +14277,8 @@ function hwGateTaskIds() {
   var seen = {};
   return ids.filter(function(id) {
     if (seen[id]) return false; seen[id] = 1;
-    return hwCache.some(function(t) { return t.id === id; }) && !hwCleared(hwMineCache.subs[id], hwMineCache.fb[id]);
+    // a task whose closing time the teacher moved later (not over any more) no longer locks
+    return hwCache.some(function(t) { return t.id === id && !(t.dueAtMs && Date.now() <= t.dueAtMs); }) && !hwCleared(hwMineCache.subs[id], hwMineCache.fb[id]);
   });
 }
 function stuGate() {
@@ -14340,6 +14344,12 @@ async function runMissCheck(force) {
         locked.push((u.fullName || u.id) + ' (tests)'); changed = true; return;
       }
       if (ml && ml.kind === 'hw') {
+        // ⏰ tasks whose closing time the teacher moved later are no longer "missed"
+        var stillDue = (ml.tasks || []).filter(function(id) { var tk = data.tasks.find(function(x) { return x.id === id; }); return tk && !(tk.dueAtMs && Date.now() <= tk.dueAtMs); });
+        if (stillDue.length < (ml.tasks || []).length) {
+          if (!stillDue.length) { delete u.missLock; u.missResetAt = Date.now(); opened.push(u.fullName || u.id); changed = true; return; }
+          ml.tasks = stillDue; changed = true;
+        }
         var left = (ml.tasks || []).filter(function(id) { return !hwCleared(data.subs[id + '_' + u.id], data.fb[id + '_' + u.id]); });
         if (!left.length) {
           if (c.hwOpen === 'auto') { delete u.missLock; u.missResetAt = Date.now(); opened.push(u.fullName || u.id); changed = true; }
@@ -14701,10 +14711,19 @@ async function saveHwTask(id, kind) {
     }
     await FBAPI.hwTaskSave(task);
     pushHw(task, !old);         // 🔔 new homework → the students' phones
+    var timeChanged = !!old && (Number(old.dueAtMs || 0) !== task.dueAtMs || Number(old.openAtMs || 0) !== task.openAtMs || (old.lateOk !== false) !== task.lateOk);
+    // ⏰ every open student app reads the homework again at once (new date / time shows, lock follows it)
+    FBAPI.saveSetting('config', { hwVer: Date.now() });
     closeModal();
-    showToast(HW_KINDS[kind].title + ' saved — ' + (task.onlyFor ? 'only ' + onlyNames(task.onlyFor).join(', ') + ' can see it.' : 'students of ' + (task.cls === 'ALL' ? 'all classes' : task.cls) + ' can see it now.'), 'success');
-    hwCache = null;
-    loadHw(true);
+    showToast(HW_KINDS[kind].title + ' saved' + (timeChanged ? ' — ⏰ new time: ' + hwWindowText(task) + '. Students see it at once.' : ' — ' + (task.onlyFor ? 'only ' + onlyNames(task.onlyFor).join(', ') + ' can see it.' : 'students of ' + (task.cls === 'ALL' ? 'all classes' : task.cls) + ' can see it now.')), 'success');
+    // the list shows the new time right away (no waiting for the reload)
+    hwCache = (hwCache || []).filter(function(x) { return x.id !== task.id; });
+    hwCache.unshift(task);
+    hwCache.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    if (currentAdminTab === 'hw' && !hwDetail) renderAdminHwContent();
+    if (hwLoading) setTimeout(function() { loadHw(true); }, 3000); else loadHw(true);
+    // a homework lock that came from this task is checked again with the new time
+    if (timeChanged && typeof runMissCheck === 'function') setTimeout(function() { runMissCheck(true); }, 1500);
   } catch (e) {
     btn.disabled = false;
     btn.textContent = '💾 Save & give to students';

@@ -1308,12 +1308,12 @@
       </div>
       <div class="stu-login-body">
       <!-- ⚠️ the rules, in big letters, before every student login -->
-      <div style="border:3px solid #dc2626; background:#fef2f2; color:#7f1d1d; border-radius:14px; padding:12px 14px; margin:0 0 14px 0;">
-        <div style="text-align:center; font-size:1.25rem; font-weight:900; color:#b91c1c; letter-spacing:0.5px; margin-bottom:8px;">⚠️ IMPORTANT NOTICE ⚠️</div>
-        <div style="font-size:1.05rem; font-weight:900; line-height:1.45; margin-bottom:8px;">1️⃣ If you do not submit your <u>HOMEWORK / ASSESSMENT</u> on time, your <span style="color:#dc2626;">LOGIN WILL BE LOCKED</span>.
-          <div style="font-size:0.98rem; font-weight:800; margin-top:3px;">সময়মতো হোমওয়ার্ক / অ্যাসেসমেন্ট জমা না দিলে তোমার লগইন বন্ধ হয়ে যাবে।</div></div>
-        <div style="font-size:1.05rem; font-weight:900; line-height:1.45;">2️⃣ If you MISS the <u>ONLINE EXAMS</u>, your <span style="color:#dc2626;">PORTAL WILL BE BLOCKED</span>.
-          <div style="font-size:0.98rem; font-weight:800; margin-top:3px;">অনলাইন পরীক্ষা মিস করলে তোমার পোর্টাল ব্লক হয়ে যাবে।</div></div>
+      <div style="border:2px solid #dc2626; background:#fef2f2; color:#7f1d1d; border-radius:12px; padding:8px 11px; margin:0 0 12px 0;">
+        <div style="text-align:center; font-size:0.95rem; font-weight:900; color:#b91c1c; letter-spacing:0.3px; margin-bottom:5px;">⚠️ IMPORTANT NOTICE ⚠️</div>
+        <div style="font-size:0.82rem; font-weight:800; line-height:1.4; margin-bottom:5px;">1️⃣ If you do not submit your <u>HOMEWORK / ASSESSMENT</u> on time, your <span style="color:#dc2626;">LOGIN WILL BE LOCKED</span>.
+          <div style="font-size:0.78rem; font-weight:700; margin-top:2px;">সময়মতো হোমওয়ার্ক / অ্যাসেসমেন্ট জমা না দিলে তোমার লগইন বন্ধ হয়ে যাবে।</div></div>
+        <div style="font-size:0.82rem; font-weight:800; line-height:1.4;">2️⃣ If you MISS the <u>ONLINE EXAMS</u>, your <span style="color:#dc2626;">PORTAL WILL BE BLOCKED</span>.
+          <div style="font-size:0.78rem; font-weight:700; margin-top:2px;">অনলাইন পরীক্ষা মিস করলে তোমার পোর্টাল ব্লক হয়ে যাবে।</div></div>
       </div>
       <p style="color:var(--text-muted); font-size:0.78rem; margin:0 0 12px 0; text-align:center;">User ID: your registered WhatsApp number • Password: the one your teacher gave you</p>
 
@@ -3412,7 +3412,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261119002856';
+var APP_BUILD = '20261119183613';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -14517,7 +14517,7 @@ async function reloadHwDetail(selectNew) {
     var f = hwDetail.fb[p];
     var sb = hwDetail.subs[p];
     // (a copy uploaded again AFTER the check is skipped: the boxes belong to the copy that was checked)
-    var need = galleryDrive() ? !f.chkId : (fbHasBoxes(f) && !f.pgKey);
+    var need = galleryDrive() ? (!f.chkId || (f.chkV || 1) < 2) : (fbHasBoxes(f) && !f.pgKey);
     if (f.status === 'checked' && need && sb && Number(sb.uploadedAt || 0) <= Number(f.checkedAt || 0) && !hwPgQueue.some(function(x) { return x.t.id === t.id && x.phone === p; })) todo.push({ t: t, phone: p, f: f, sub: sb });
   });
   if (todo.length) { showToast('📄 Preparing the marked pages of ' + todo.length + ' checked cop' + (todo.length === 1 ? 'y' : 'ies') + ' for the students (in the background)…', 'success'); queueMarkedPages(todo); }
@@ -14664,7 +14664,7 @@ async function hwDownloadZip() {
         var data = await hwGetSubData(d.subs[phones[i]]);
         // 📄 first page: name, ACSM ID, the questions — then the question paper — then the student's pages
         var su = byId[phones[i]] || { id: phones[i] };
-        if (data) { try { data = await withCoverPdf(data, hwCoverInfo(d.task, su, phones[i], d.subs[phones[i]]), qPdf); } catch (e) {} }
+        if (data) { try { withCoverPdf.lastOffset = 0; data = await withCoverPdf(data, hwCoverInfo(d.task, su, phones[i], d.subs[phones[i]]), qPdf); hwZipOffSet(d.task.id, phones[i], withCoverPdf.lastOffset); } catch (e) {} }
         if (data) zip.file(hwFileName(byId[phones[i]] || { id: phones[i] }, d.task), data.split(',')[1], { base64: true });
         else failed++;
       } catch (e) { failed++; }
@@ -14681,6 +14681,29 @@ async function hwDownloadZip() {
   btn.disabled = false;
 }
 
+// 📄 where each student's handwriting starts in the ZIP PDF (cover + question paper before it) — kept per task
+function hwZipOffSet(taskId, phone, n) {
+  if (!(n > 0)) return;
+  var all = {};
+  try { all = JSON.parse(localStorage.getItem('acsm_zipoff_' + taskId) || '{}') || {}; } catch (e) {}
+  all[phone] = n;
+  try { localStorage.setItem('acsm_zipoff_' + taskId, JSON.stringify(all)); } catch (e) {}
+}
+function hwZipOffGet(taskId, phone) {
+  try { return Number((JSON.parse(localStorage.getItem('acsm_zipoff_' + taskId) || '{}') || {})[phone]) || 0; } catch (e) { return 0; }
+}
+// the question numbers of a task, read from the teacher's question text ("1.", "Q2", "3)" at a line start) — [] if unclear
+function hwQuestionNumbers(t) {
+  var txt = plainText((t && t.instructions) || ''), set = {};
+  txt.split('\n').forEach(function(l) {
+    var m = l.match(/^\s*(?:Q(?:uestion)?\.?\s*|প্রশ্ন\s*)?(\d{1,2})\s*[\.\)\:\-]/i) || l.match(/^\s*Q(?:uestion)?\.?\s*(\d{1,2})\b/i);
+    if (m) set[Number(m[1])] = 1;
+  });
+  var nums = Object.keys(set).map(Number).sort(function(a, b) { return a - b; });
+  return nums.length >= 2 ? nums : [];
+}
+// the number of a label like "Q5(a)(ii)" / "5 (b)" / "Question 3" → 5 / 5 / 3 (0 = none)
+function hwQNumOf(label) { var m = String(label || '').match(/(?:Q(?:uestion)?\.?\s*)?(\d{1,2})/i); return m ? Number(m[1]) : 0; }
 function hwCopyPrompt() {
   var d = hwDetail, t = d.task, k = HW_KINDS[hwKind(t)];
   var phones = hwZipPhones();
@@ -14688,25 +14711,36 @@ function hwCopyPrompt() {
   var recheck = phones.some(function(p) { return d.fb[p] && d.fb[p].status === 'checked'; });
   var byId = {};
   DB.get(K.U).forEach(function(u) { byId[u.id] = u; });
-  var list = phones.map(function(p) { var u = byId[p] || { id: p }; return '- ' + p + ' — ' + (u.fullName || '') + ' — file: ' + hwFileName(u, t); }).join('\n');
+  var list = phones.map(function(p) {
+    var u = byId[p] || { id: p }, off = hwZipOffGet(t.id, p);
+    return '- ' + p + ' — ' + (u.fullName || '') + ' — file: ' + hwFileName(u, t) + (off ? ' — PDF pages 1–' + off + ' = cover + question paper; the student\'s HANDWRITING starts on PDF page ' + (off + 1) : '');
+  }).join('\n');
+  var qn = hwQuestionNumbers(t);
   var prompt =
-    'You are a kind but careful mathematics teacher checking students\' ' + k.title.toLowerCase() + ' answer sheets (handwritten, scanned as PDF).\n\n' +
+    'You are a kind, fair and very careful mathematics teacher checking students\' ' + k.title.toLowerCase() + ' answer sheets (handwritten, scanned as PDF).\n\n' +
     'TASK: ' + t.title + '\nCLASS: ' + (t.cls === 'ALL' ? 'All' : t.cls) + '\n' +
     (k.marks ? 'FULL MARKS: ' + t.maxMarks + '\n' : '') +
-    'QUESTIONS / INSTRUCTIONS GIVEN BY THE TEACHER:\n' + (t.instructions || '(see the question paper)') + '\n\n' +
-    'I am attaching ' + phones.length + ' PDF file(s). The student\'s number is inside each file name. The first page of every file shows the student\'s name, ACSM ID and the questions; the question paper comes next, then the student\'s handwritten pages:\n' + list + '\n\n' +
+    'QUESTIONS / INSTRUCTIONS GIVEN BY THE TEACHER:\n' + (t.instructions || '(see the question paper inside each PDF)') + '\n' +
+    (qn.length ? 'THE ONLY QUESTION NUMBERS IN THIS TASK: ' + qn.map(function(n) { return 'Q' + n; }).join(', ') + '\n' : '') + '\n' +
+    'I am attaching ' + phones.length + ' PDF file(s). The student\'s number is inside each file name. In every file: page 1 = the student\'s name, ACSM ID and the questions; then the question paper; then the student\'s handwritten pages:\n' + list + '\n\n' +
     (recheck ? 'This is a RE-CHECK: check every sheet again from the beginning, carefully and independently.\n\n' : '') +
-    'For EACH student read their PDF and check every answer. Then reply with ONLY a JSON array (no other text, no markdown), one object per student:\n' +
-    '[{"studentId":"<number from the file name>",' + (k.marks ? '"marks":<number from 0 to ' + t.maxMarks + '>,' : '') + '"percent":<0 to 100: how much of the whole task is done correctly>,"remark":"one short overall remark for the student",' +
-    '"overall":"Every answer was re-worked and compared with the script. Two answers are wrong (Q5(a) and Q5(c)(iii)); three smaller slips do not change the final answers. Everything else is correct.",' +
-    '"questions":[{"q":"Q1 (i)–(x) MCQ","verdict":"correct","note":"b, b, c, c, c, c, b, b, c, c"},{"q":"Q3(c) Balls","verdict":"slip","note":"answers correct, slip in (iii) — see E1"},{"q":"Q5(a) Building & lamp post","verdict":"wrong","note":"AB taken as 65 m instead of 60 m — see E3, E4"},{"q":"Q7","verdict":"skipped","note":""}],' +
-    '"errors":[{"tag":"E1","q":"Q3(c)(iii)","severity":"slip","title":"statement does not match the question","written":"Probability of neither red nor white ball = 1 − 14/20 = 3/10","correct":"The question asks for neither green nor white: green + white = 9 + 5 = 14, so P = 1 − 14/20 = 3/10","feedback":"The number 14 and the answer are right, but the words say red where it should be green. Write the event exactly as asked.","page":7,"box":[60,40,210,960]},' +
-    '{"tag":"E4","q":"Q5(a)(i)","severity":"wrong","title":"wrong value of AB","written":"tan 60° = 65/CB, so CB = 65/√3 = 37.53 m","correct":"AB = 60 m (given). tan 60° = 60/BC, so BC = 60/√3 = 20√3 = 34.64 m","feedback":"A copying mistake: 60 became 65. The method is right, only the substitution fails. Underline the given values and check them against the figure before substituting.","page":9,"box":[150,80,470,900]}],' +
-    '"missed":["Q2: the final check of the answer","Q5: the unit (cm²) in the answer"],"hints":["Q5(a): Idea: in right triangle ABC the height AB and the angle 60° are known, so use tan. Step 1: AB = 60 m is given (you took 65 m — that is the mistake). Step 2: tan 60° = AB/BC, so √3 = 60/BC. Step 3: BC = 60/√3 = (60 × √3)/(√3 × √3) = 60√3/3 = 20√3 m. Step 4: for part (ii) use the same BC in triangle DBC: tan 30° = DC/BC, so 1/√3 = DC/(20√3). Step 5: now finish this calculation yourself and write DC with the unit (m)."],' +
-    '"strengths":["all identity proofs are complete with reasons in brackets","figures are drawn for every Heights & Distances problem"],"advice":["Show the favourable outcomes in probability — this is where method marks are given.","Copy the data carefully: underline the given values before substituting.","Read neither…nor, at least and colour words twice."],' +
-    '"skipped":["Q7"],"resubmit":true}]\n\n' +
+    '⚠️ STRICT RULES — a student must never be blamed for something that is not on the paper:\n' +
+    '1. Use ONLY the questions of THIS task (the question paper / the list above). NEVER mention a question number that is not in the task. Never invent a question, a part, a number or a mistake.\n' +
+    '2. First find, for every question of the task, WHERE the student answered it (which handwritten page). A question with no answer anywhere goes to "skipped" — no error for it.\n' +
+    '3. An error may be reported ONLY if you can SEE it: "written" must copy the student\'s own words / numbers exactly as they appear on that page. If you cannot read a line clearly, do NOT call it wrong — write "could not read clearly" in the note.\n' +
+    '4. Re-work every answer yourself. If the student\'s method or answer is right (even if different from yours, or written in another correct form), it is CORRECT. When in doubt, it is correct.\n' +
+    '5. Before replying, check every error once more: is the question in this task? is the quoted line really on that page? If not — delete that error.\n\n' +
+    'For EACH student read their PDF and check every answer. Then reply with ONLY a JSON array (no other text, no markdown), one object per student. THE EXAMPLE BELOW ONLY SHOWS THE SHAPE — its questions and values are NOT from this task, never copy them:\n' +
+    '[{"studentId":"<number from the file name>",' + (k.marks ? '"marks":<number from 0 to ' + t.maxMarks + '>,' : '') + '"percent":<0 to 100: how much of the whole task is done correctly>,"remark":"<one short overall remark for the student>",' +
+    '"overall":"<2–3 sentences: which questions are right, which are wrong>",' +
+    '"questions":[{"q":"<Q-number of THIS task>","verdict":"correct | slip | wrong | skipped","note":"<short: the answer value, or see E1>"}],' +
+    '"errors":[{"tag":"E1","q":"<Q-number of THIS task>","severity":"wrong | slip","title":"<what is wrong, short>","written":"<the student\'s own line, copied exactly>","correct":"<the correct working, short>","feedback":"<why it went wrong and how to avoid it>","pen":"<red-pen note to write beside the circle on the page: max 8 words, plain text, no LaTeX>","pdfPage":<page of the PDF FILE where this line is>,"page":<handwritten page number>,"box":[ymin,xmin,ymax,xmax]}],' +
+    '"missed":["<Q-number>: <the part left out>"],"hints":["<Q-number>: Idea: … Step 1: … Step 2: … (see HOW TO WRITE A HINT)"],' +
+    '"strengths":["<1–3 things done well>"],"advice":["<2–4 general tips>"],"skipped":["<Q-numbers not attempted>"],"resubmit":true}]\n\n' +
     'Check EVERY question of the task one by one, line by line. Re-work every answer yourself and compare it with the script.\n' +
     fbDetailPromptRules() +
+    '- "pdfPage": the page number of the PDF FILE (as a PDF viewer counts, cover = page 1). "page": the handwritten page (pdfPage minus the cover and question-paper pages). Give both.\n' +
+    '- "pen": what a teacher would write in red beside the circled mistake, e.g. "AB = 60 m, not 65", "sign error: -3", "unit missing". Max 8 words, plain text.\n' +
     '- "skipped": the questions the student did NOT attempt at all (e.g. ["Q4","Q7"]).\n' +
     '- "missed": the parts the student left out in an attempted answer (a step, a reason, the final answer, the unit, a diagram, the check …). Start every line with the question number ("Q2: …").\n' +
     '- "hints": for EVERY question with a mistake, a missed part or left out (skipped), one hint per question, starting with the question number ("Q5(a): …").\n' + HINT80_RULE +
@@ -14718,13 +14752,13 @@ function hwCopyPrompt() {
 
 // 💡 the hint rule for every copy-check prompt: the hint is a worked solution about 80% done — only the last step(s) and the final answer are left
 var HINT80_RULE =
-  '- HOW TO WRITE A HINT (very important): the hint must be a WORKED SOLUTION that is about 80% complete, so even a weak student can follow it and finish alone.\n' +
+  '- HOW TO WRITE A HINT (very important): the hint must be a WORKED SOLUTION that is about 90% complete, so even a weak student can follow it and finish alone.\n' +
   '  • Start with the idea / formula / theorem to use and WHY (e.g. "Idea: use tan θ = opposite/adjacent because the height and the angle are given").\n' +
   '  • Then write the actual working step by step with the numbers of that question ("Step 1: … Step 2: … Step 3: …"): substitute the values, simplify, and show every intermediate line — do not just describe what to do.\n' +
   '  • Where the student went wrong, show the correct line next to it ("You wrote …, it should be … because …").\n' +
-  '  • STOP before the last step(s): leave only the final calculation and the final answer for the student, ending with a line like "Step 5: now finish this calculation yourself and write the answer with the unit."\n' +
-  '  • Proofs: write about 80% of the proof (the main statements with reasons) and leave the last 1–2 lines and the conclusion. Constructions / graphs: give every step except the last one.\n' +
-  '  • Usually 5–8 steps per question. Never write the final answer itself.\n';
+  '  • STOP only at the very last step: leave just the final small calculation and the final answer for the student, ending with a line like "Step 5: now finish this calculation yourself and write the answer with the unit."\n' +
+  '  • Proofs: write about 90% of the proof (all main statements with reasons) and leave only the last line and the conclusion. Constructions / graphs: give every step except the last one.\n' +
+  '  • Usually 6–10 steps per question. Never write the final answer itself.\n';
 
 function openHwPasteModal() {
   hwPreview = [];
@@ -14820,7 +14854,9 @@ function fbNormDetail(it) {
       sev: /slip|minor|notation|amber/i.test(String(e.severity || e.sev || '')) ? 'slip' : 'wrong',
       title: String(e.title || '').trim().slice(0, 160), written: String(e.written || e.whatIsWritten || e.student || '').trim().slice(0, 900),
       correct: String(e.correct || e.correctWorking || '').trim().slice(0, 1200), feedback: String(e.feedback || e.why || '').trim().slice(0, 1200),
-      page: Number(e.page) > 0 ? Math.round(Number(e.page)) : 0, box: box
+      page: Number(e.page) > 0 ? Math.round(Number(e.page)) : 0, box: box,
+      pdfPage: Number(e.pdfPage || e.pdf_page) > 0 ? Math.round(Number(e.pdfPage || e.pdf_page)) : 0,
+      pen: String(e.pen || e.penNote || '').trim().slice(0, 90)          // ✍️ the red-pen note beside the circle
     });
   });
   return out;
@@ -14990,6 +15026,25 @@ function fbBytesToDataUrl(bytes) {
   for (var i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
   return 'data:application/pdf;base64,' + btoa(s);
 }
+// maths / LaTeX → readable plain text (√, ², θ …) for drawing on a canvas
+function texToReadable(s) {
+  var t = plainText(String(s || ''));
+  t = t.replace(/\\\(|\\\)|\\\[|\\\]|\$\$?/g, '').replace(/\\left|\\right|\\displaystyle|\\,|\\;|\\!|\\quad/g, ' ');
+  var wrap = function(x) { x = String(x).trim(); return /^[A-Za-z0-9√.°]+$/.test(x) ? x : '(' + x + ')'; };
+  for (var g = 0; g < 4; g++) t = t.replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, function(m, a, b) { return wrap(a) + '/' + wrap(b); }).replace(/\\sqrt\{([^{}]*)\}/g, function(m, a) { return '√' + wrap(a); });
+  var sup = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', 'n': 'ⁿ', '-': '⁻' };
+  t = t.replace(/\^\{([0-9n-]{1,3})\}|\^([0-9n])/g, function(m, a, b) { return String(a || b).split('').map(function(ch) { return sup[ch] || ch; }).join(''); });
+  var map = { '\\times': '×', '\\cdot': '·', '\\div': '÷', '\\pm': '±', '\\theta': 'θ', '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\pi': 'π', '\\circ': '°', '\\degree': '°', '\\neq': '≠', '\\ne': '≠', '\\leq': '≤', '\\le': '≤', '\\geq': '≥', '\\ge': '≥', '\\infty': '∞', '\\Rightarrow': '⇒', '\\implies': '⇒', '\\therefore': '∴', '\\angle': '∠', '\\triangle': '△', '\\sqrt': '√', '\\sin': 'sin', '\\cos': 'cos', '\\tan': 'tan', '\\cot': 'cot', '\\sec': 'sec', '\\csc': 'cosec', '\\log': 'log' };
+  Object.keys(map).forEach(function(k) { t = t.split(k).join(map[k]); });
+  return t.replace(/\\text\{([^{}]*)\}/g, '$1').replace(/\\[a-zA-Z]+/g, '').replace(/[{}]/g, '').replace(/\^\s*°/g, '°').replace(/[ \t]+/g, ' ').trim();
+}
+// the same, but only letters the PDF's built-in font can write (π → pi, √ → sqrt …)
+function pdfSafeText(s) {
+  var t = texToReadable(s);
+  var rep = { '√': 'sqrt', 'π': 'pi', 'θ': 'theta', 'α': 'alpha', 'β': 'beta', 'γ': 'gamma', '≠': '!=', '≤': '<=', '≥': '>=', '∞': 'inf', '⇒': '=>', '∴': 'so', '∠': 'angle ', '△': 'triangle ', '−': '-', '–': '-', '—': '-', '’': "'", '‘': "'", '“': '"', '”': '"', '⁰': '^0', '⁴': '^4', '⁵': '^5', '⁶': '^6', '⁷': '^7', '⁸': '^8', '⁹': '^9', 'ⁿ': '^n', '⁻': '-', '…': '...' };
+  t = t.split('').map(function(ch) { return rep[ch] !== undefined ? rep[ch] : ch; }).join('');
+  return t.replace(/[^\x20-\x7E\xA0-\xFF]/g, '').replace(/\s+/g, ' ').trim().slice(0, 90);
+}
 async function hwBuildCheckedPdf(fileData, errors) {
   var L = await loadPdfLib(), doc;
   if (Array.isArray(fileData)) {                        // a copy sent as photos: one PDF page per photo
@@ -15024,26 +15079,134 @@ async function hwBuildCheckedPdf(fileData, errors) {
     var slip = e.sev === 'slip' || e.severity === 'slip';
     var col = slip ? L.rgb(0.85, 0.47, 0.02) : L.rgb(0.86, 0.15, 0.15);
     var x1 = e.box[1] / 1000 * VW, y1 = e.box[0] / 1000 * VH, x2 = e.box[3] / 1000 * VW, y2 = e.box[2] / 1000 * VH;
-    var lw = Math.max(1.5, VW / 260);
-    p.drawRectangle(Object.assign(rect(x1, y1, x2, y2), { borderColor: col, borderWidth: lw, color: col, opacity: 0.1, borderOpacity: 1 }));
-    // the tag (E1, E2 …) in a coloured label just above the box
+    var lw = Math.max(1.6, VW / 230);
+    // ⭕ a red-pen ring around the mistake (a little bigger than the box, like a teacher's circle)
+    var cx = (x1 + x2) / 2, cy = (y1 + y2) / 2, rx = (x2 - x1) / 2 + VW * 0.015, ry = (y2 - y1) / 2 + VH * 0.012;
+    var c0 = map(cx, cy);
+    p.drawEllipse({ x: c0[0], y: c0[1], xScale: r % 180 ? ry : rx, yScale: r % 180 ? rx : ry, borderColor: col, borderWidth: lw, color: col, opacity: 0.06, borderOpacity: 0.95 });
+    // the tag (E1, E2 …) in a coloured label at the top-right of the ring
     var tag = String(e.tag || '').slice(0, 6) || '!', fs = Math.max(9, Math.round(VW / 45)), tw = font.widthOfTextAtSize(tag, fs) + fs * 0.8, th = fs * 1.45;
-    var lx = Math.max(0, Math.min(x2 - tw, VW - tw)), ly = Math.max(0, y1 - th);
+    var lx = Math.max(0, Math.min(cx + rx * 0.7 - tw / 2, VW - tw)), ly = Math.max(0, cy - ry - th * 0.6);
     p.drawRectangle(Object.assign(rect(lx, ly, lx + tw, ly + th), { color: col }));
     var o = map(lx + fs * 0.4, ly + th * 0.75);
     p.drawText(tag, { x: o[0], y: o[1], size: fs, font: font, color: L.rgb(1, 1, 1), rotate: L.degrees(r) });
+    // ✍️ the red-pen note beside the ring (right side if there is room, else under it) on a light background
+    var note = pdfSafeText(e.pen || e.title || '');
+    if (note) {
+      var nfs = Math.max(8, Math.round(VW / 52)), maxW = VW * 0.34, words = note.split(/\s+/), lines = [], cur = '';
+      words.forEach(function(w) { var t2 = cur ? cur + ' ' + w : w; if (font.widthOfTextAtSize(t2, nfs) > maxW && cur) { lines.push(cur); cur = w; } else cur = t2; });
+      if (cur) lines.push(cur);
+      lines = lines.slice(0, 3);
+      var bw = Math.max.apply(null, lines.map(function(l) { return font.widthOfTextAtSize(l, nfs); })) + nfs * 0.8, bh = lines.length * nfs * 1.25 + nfs * 0.5;
+      var right = cx + rx + nfs * 0.6;
+      var bx = right + bw <= VW ? right : Math.max(0, Math.min(cx - bw / 2, VW - bw));
+      var by = right + bw <= VW ? Math.max(0, Math.min(cy - bh / 2, VH - bh)) : Math.min(VH - bh, cy + ry + nfs * 0.3);
+      p.drawRectangle(Object.assign(rect(bx, by, bx + bw, by + bh), { color: L.rgb(1, 1, 1), opacity: 0.82, borderColor: col, borderWidth: 0.8, borderOpacity: 0.9 }));
+      lines.forEach(function(l, li) {
+        var o2 = map(bx + nfs * 0.4, by + nfs * 0.3 + (li + 1) * nfs * 1.25 - nfs * 0.25);
+        p.drawText(l, { x: o2[0], y: o2[1], size: nfs, font: font, color: col, rotate: L.degrees(r) });
+      });
+    }
   });
   return await doc.save({ useObjectStreams: true });
+}
+// 📝 the teacher's comments as A4 pages (drawn as pictures, so Bengali, √, ², θ … all print correctly)
+function fbFeedbackCanvases(t, u, f) {
+  var W = 1240, H = 1754, M = 80, pages = [], c = null, g = null, y = 0;
+  var FONT = '"Segoe UI", "Noto Sans Bengali", "Nirmala UI", Arial, sans-serif';
+  var newPage = function() {
+    c = document.createElement('canvas'); c.width = W; c.height = H; g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#b91c1c'; g.fillRect(0, 0, W, 14);
+    g.fillStyle = '#64748b'; g.font = '600 22px ' + FONT; g.textBaseline = 'alphabetic';
+    g.fillText('A Complete Solution of Mathematics — ' + (u.fullName || '') + (u.regNo ? ' (' + u.regNo + ')' : '') + ' — ' + (t.title || ''), M, 48);
+    pages.push(c); y = 90;
+  };
+  var need = function(h) { if (!c || y + h > H - 70) newPage(); };
+  // one paragraph, wrapped; returns nothing — moves y
+  var para = function(text, size, color, weight, indent) {
+    text = texToReadable(text); if (!text) return;
+    indent = indent || 0;
+    g.font = (weight || '400') + ' ' + size + 'px ' + FONT;
+    var lh = Math.round(size * 1.38), maxW = W - 2 * M - indent;
+    text.split('\n').forEach(function(par) {
+      var words = par.split(/\s+/), line = '';
+      var flush = function() { need(lh); g.font = (weight || '400') + ' ' + size + 'px ' + FONT; g.fillStyle = color || '#111827'; g.fillText(line, M + indent, y + size); y += lh; line = ''; };
+      words.forEach(function(w) { var tst = line ? line + ' ' + w : w; if (g.measureText(tst).width > maxW && line) { flush(); line = w; } else line = tst; });
+      if (line) flush();
+    });
+  };
+  var head = function(text, color) { need(80); y += 14; g.fillStyle = color || '#1e3a8a'; g.fillRect(M, y, 8, 40); g.font = '800 32px ' + FONT; g.fillText(text, M + 22, y + 32); y += 56; };
+  var gap = function(n) { y += n || 10; };
+  newPage();
+  // title + marks
+  g.fillStyle = '#7f1d1d'; g.font = '900 44px ' + FONT; g.fillText('Teacher\'s Feedback', M, y + 40); y += 64;
+  var pct = hwPct(f, t), gr = hwGrade(pct);
+  para((f.marks !== null && f.marks !== undefined && f.maxMarks ? 'Marks: ' + f.marks + ' / ' + f.maxMarks + '    ' : '') + (pct !== null ? 'Done correctly: ' + pct + '%    ' : '') + (gr ? 'Grade: ' + gr.label.replace(/^\S+\s/, '') : ''), 30, '#065f46', '800');
+  if (f.remark) { gap(6); para('💬 ' + f.remark, 28, '#111827', '700'); }
+  if (f.overall) { gap(4); para(f.overall, 26, '#334155'); }
+  if (f.resubmit) { gap(8); need(70); g.fillStyle = '#fef2f2'; g.fillRect(M, y, W - 2 * M, 60); g.strokeStyle = '#dc2626'; g.lineWidth = 3; g.strokeRect(M, y, W - 2 * M, 60); g.fillStyle = '#b91c1c'; g.font = '800 26px ' + FONT; g.fillText('🔁 Correct the mistakes using the hints and upload your work again.', M + 18, y + 40); y += 76; }
+  if ((f.qtable || []).length) {
+    head('Question by question');
+    f.qtable.forEach(function(r) {
+      var v = String(r.verdict || ''), col = v === 'correct' ? '#15803d' : (v === 'slip' ? '#b45309' : (v === 'skipped' ? '#475569' : '#b91c1c'));
+      var mark = v === 'correct' ? '✔ correct' : (v === 'slip' ? '◐ small slip' : (v === 'skipped' ? '— not attempted' : '✘ wrong'));
+      need(40); g.font = '800 26px ' + FONT; g.fillStyle = '#1e293b'; g.fillText(texToReadable(r.q), M, y + 26);
+      g.fillStyle = col; g.fillText(mark, M + 330, y + 26); y += 36;
+      if (r.note) para(r.note, 23, '#475569', '400', 30);
+    });
+  }
+  if ((f.errors || []).length) {
+    head('Mistakes — circled in red on your pages', '#b91c1c');
+    f.errors.forEach(function(e) {
+      gap(4); need(60);
+      para(e.tag + ' — ' + (e.q || '') + (e.title ? ' — ' + e.title : '') + (e.page ? '  (your page ' + e.page + ')' : ''), 27, e.sev === 'slip' ? '#b45309' : '#b91c1c', '800');
+      if (e.written) para('You wrote: ' + e.written, 24, '#7f1d1d', '400', 26);
+      if (e.correct) para('Correct: ' + e.correct, 24, '#065f46', '600', 26);
+      if (e.feedback) para('Why / how to avoid it: ' + e.feedback, 24, '#334155', '400', 26);
+    });
+  }
+  var list = function(title, arr, color) { if (!(arr || []).length) return; head(title, color); arr.forEach(function(s) { para('• ' + s, 25, '#1f2937', '400', 6); gap(2); }); };
+  list('Parts you left out', f.missed, '#92400e');
+  if ((f.skipped || []).length) { head('Not attempted', '#475569'); para(f.skipped.join(', '), 25, '#334155'); }
+  if ((f.hints || []).length) {
+    head('Hints — follow the steps, then finish it yourself', '#1d4ed8');
+    f.hints.forEach(function(h) {
+      gap(4);
+      String(h).replace(/\s*(Step\s*\d+\s*:)/gi, '\n$1').split('\n').forEach(function(line, i) { para(line, i ? 24 : 25, i ? '#1e3a8a' : '#1e293b', i ? '400' : '700', i ? 26 : 0); });
+    });
+  }
+  list('What you did well', f.strengths, '#15803d');
+  list('Advice', f.advice, '#7c3aed');
+  return pages;
+}
+// 📕 ONE complete PDF for the student and the teacher: cover (name, ID) → question paper → teacher's feedback →
+// the student's own pages with every mistake circled in red and the red-pen note beside it
+async function hwBuildFullReport(t, phone, f, sub) {
+  var L = await loadPdfLib(), out = await L.PDFDocument.create();
+  var bytesOf = function(dataUrl) { return Uint8Array.from(atob(String(dataUrl).split(',')[1] || ''), function(ch) { return ch.charCodeAt(0); }); };
+  var addImg = async function(canvas) {
+    var jp = await out.embedJpg(bytesOf(canvas.toDataURL('image/jpeg', 0.86)));
+    out.addPage([595, 595 * canvas.height / canvas.width]).drawImage(jp, { x: 0, y: 0, width: 595, height: 595 * canvas.height / canvas.width });
+  };
+  var addPdf = async function(bytes) { var src = await L.PDFDocument.load(bytes, { ignoreEncryption: true }); (await out.copyPages(src, src.getPageIndices())).forEach(function(pg) { out.addPage(pg); }); };
+  var u = DB.get(K.U).find(function(x) { return x.id === phone; }) || { id: phone };
+  await addImg(coverCanvas(hwCoverInfo(t, u, phone, sub)));
+  var q = await hwQuestionPdf(t);
+  if (q) { try { await addPdf(bytesOf(q)); } catch (e) {} }
+  var fbPages = fbFeedbackCanvases(t, u, f);
+  for (var i = 0; i < fbPages.length; i++) await addImg(fbPages[i]);
+  await addPdf(await hwBuildCheckedPdf(await hwGetSubData(sub), f.errors));
+  return await out.save({ useObjectStreams: true });
 }
 // made on the teacher's portal right after the feedback is saved (in the background)
 async function hwStoreCheckedCopy(t, phone, f, sub) {
   var drive = galleryDrive();
   if (!drive || !sub || f.status !== 'checked') return false;
-  var data = await hwGetSubData(sub);
-  var pdf = await hwBuildCheckedPdf(data, f.errors);
+  var pdf = await hwBuildFullReport(t, phone, f, sub);
   var j = await driveUpload(drive, 'public', ['Checked', t.title || t.id], phone + ' ' + t.id + ' checked', fbBytesToDataUrl(pdf));
   if (!j || !j.id) return false;
-  f.chkId = j.id; f.chkDrive = drive.id; f.chkAt = Date.now(); f.chkOf = Number(sub.uploadedAt || 0);
+  f.chkId = j.id; f.chkDrive = drive.id; f.chkAt = Date.now(); f.chkOf = Number(sub.uploadedAt || 0); f.chkV = 2;   // v2 = the complete PDF
   await FBAPI.hwFeedbackSave(f);
   return true;
 }
@@ -15108,10 +15271,23 @@ async function stuDownloadCheckedCopy(taskId) {
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
     var url = URL.createObjectURL(new Blob([arr], { type: 'application/pdf' }));
     var a = document.createElement('a');
-    a.href = url; a.download = String(t.title || 'homework').replace(/[\\\/:*?"<>|]+/g, ' ').trim() + ' - my checked copy.pdf';
+    a.href = url; a.download = String(t.title || 'homework').replace(/[\\\/:*?"<>|]+/g, ' ').trim() + ' - checked copy.pdf';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
   } catch (e) { showToast('Could not download — check the internet and try again.', 'error'); }
+}
+// 👩‍🏫 the teacher downloads the same complete PDF the student gets
+async function teacherFullPdf(phone) {
+  var d = hwDetail, f = d && d.fb[phone];
+  if (!f || !f.chkId) return;
+  var u = DB.get(K.U).find(function(x) { return x.id === phone; }) || { fullName: phone };
+  showToast('⬇ Downloading…', 'success');
+  try {
+    var data = await chkCopyData(f);
+    var bin = atob(data.split(',')[1]), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    saveBlobAs(new Blob([arr], { type: 'application/pdf' }), asciiOnly((u.fullName || phone) + ' - ' + (d.task.title || 'homework')).replace(/[\\\/:*?"<>|]+/g, ' ').trim() + ' - checked.pdf');
+  } catch (e) { showToast('Could not download — check the internet.', 'error'); }
 }
 // the student's checked-copy buttons under the feedback
 function stuCheckedCopyHtml(t, f, s) {
@@ -15121,9 +15297,9 @@ function stuCheckedCopyHtml(t, f, s) {
   if (typeof hwNewFbIds !== 'undefined' && hwNewFbIds[t.id]) setTimeout(function() { preloadPdfJs(); chkCopyData(f).catch(function() {}); }, 1500);
   return '<div style="margin-top:8px; padding:10px 12px; border-radius:10px; background:rgba(59,130,246,0.10); border:1px solid #3b82f6;">' +
     '<b>📄 Your checked copy</b>' + (older ? ' <span style="font-size:0.76rem; color:#fde68a;">(the copy checked on ' + esc(fmtDateTime(f.checkedAt)) + ')</span>' : '') +
-    '<div style="font-size:0.8rem; color:var(--text-muted); margin:2px 0 8px;">Your own handwritten pages — every mistake has a red / orange box with its number (E1, E2 …).</div>' +
+    '<div style="font-size:0.8rem; color:var(--text-muted); margin:2px 0 8px;">' + ((f.chkV || 1) >= 2 ? 'ONE PDF: your details → the question paper → your teacher’s comments → your own pages with every mistake circled in red (E1, E2 …) and a note beside it.' : 'Your own handwritten pages — every mistake has a red / orange box with its number (E1, E2 …).') + '</div>' +
     '<div style="display:flex; gap:6px; flex-wrap:wrap;"><button type="button" class="btn btn-teal btn-sm" onclick="stuOpenCheckedCopy(\'' + escA(t.id) + '\')">👁 See my checked copy</button>' +
-    '<button type="button" class="btn btn-slate btn-sm" onclick="stuDownloadCheckedCopy(\'' + escA(t.id) + '\')">⬇ Copy only (PDF)</button></div>' +
+    '<button type="button" class="btn btn-slate btn-sm" onclick="stuDownloadCheckedCopy(\'' + escA(t.id) + '\')">⬇ ' + ((f.chkV || 1) >= 2 ? 'Download the full PDF' : 'Copy only (PDF)') + '</button></div>' +
     '<div id="chk-' + escA(t.id) + '"></div></div>';
 }
 
@@ -15221,7 +15397,7 @@ function openHwFeedbackView(phone) {
   if (!f) return;
   document.getElementById('row-editor-body').innerHTML =
     '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px;"><h3 style="margin:0;">👁 ' + esc(u.fullName || phone) + ' <span style="font-size:0.8rem; color:var(--text-muted);">' + esc(u.regNo || '') + '</span></h3>' +
-      '<div style="display:flex; gap:6px;"><button type="button" class="btn btn-blue btn-sm" onclick="hwFeedbackPdf([\'' + escA(phone) + '\'])">📄 PDF</button><button type="button" class="btn btn-amber btn-sm" onclick="openHwFeedbackModal(\'' + escA(phone) + '\')">✏️ Edit</button><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div></div>' +
+      '<div style="display:flex; gap:6px; flex-wrap:wrap;">' + (f.chkId ? '<button type="button" class="btn btn-green btn-sm" onclick="teacherFullPdf(\'' + escA(phone) + '\')">⬇ Full PDF (as the student gets it)</button>' : '') + '<button type="button" class="btn btn-blue btn-sm" onclick="hwFeedbackPdf([\'' + escA(phone) + '\'])">📄 PDF</button><button type="button" class="btn btn-amber btn-sm" onclick="openHwFeedbackModal(\'' + escA(phone) + '\')">✏️ Edit</button><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div></div>' +
     '<div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px;">This is exactly what the student sees.</div>' +
     (f.status === 'missing' ? '<div class="fb-card"><b>❌ Not submitted</b>' + (f.remark ? '<div class="fb-remark">💬 ' + mx(f.remark) + '</div>' : '') + '</div>' : hwFeedbackHtml(f, t));
   document.getElementById('row-editor-modal').classList.remove('hidden');
@@ -15283,6 +15459,7 @@ async function studentHwReport(taskId) {
     r.subs.forEach(function(x) { hwMineCache.subs[x.taskId] = x; });
   } catch (e) {}
   var f = hwMineCache.fb[taskId];
+  if (f.chkId && (f.chkV || 1) >= 2) { try { w.close(); } catch (e) {} return stuDownloadCheckedCopy(taskId); }   // the complete PDF is ready: just download it
   if (f.chkId) {
     // ✅ the feedback at once, then EVERY page of the checked copy (the mistakes boxed) — page by page
     preloadPdfJs();
@@ -15376,7 +15553,8 @@ async function withCoverPdf(sheetDataUrl, info, questionPdf) {
   };
   withCoverPdf.lastQ = questionPdf ? 'fail' : 'none';   // what happened to the question paper (shown to the teacher)
   if (questionPdf) { try { await add(questionPdf); withCoverPdf.lastQ = 'ok'; } catch (e) {} }
-  try { await add(sheetDataUrl); } catch (e) { return sheetDataUrl; }   // a sheet that cannot be read at all: give it as it is
+  withCoverPdf.lastOffset = out.getPageCount();       // the student's handwriting starts on the NEXT page
+  try { await add(sheetDataUrl); } catch (e) { withCoverPdf.lastOffset = 0; return sheetDataUrl; }   // a sheet that cannot be read at all: give it as it is
   return 'data:application/pdf;base64,' + (await out.saveAsBase64());
 }
 // the question paper PDF of a homework / assignment (empty if the task has none)
@@ -15486,6 +15664,20 @@ function hwCheckJson() {
       remark: String(it.remark || '').trim(), summary: String(it.summary || '').trim(),
       skipped: hwStrList(it.skipped || it.notAttempted), mistakes: hwStrList(it.mistakes), missed: hwStrList(it.missed || it.missedParts || it.missing), hints: hwStrList(it.hints || it.suggestions), resubmit: !!it.resubmit, checkedAt: Date.now()
     });
+    // 📄 the exact handwritten page: the AI's PDF-file page minus the cover + question-paper pages of THIS student's file
+    var off = hwZipOffGet(t.id, p);
+    (fbNew.errors || []).forEach(function(e) { if (off && e.pdfPage > off) e.page = e.pdfPage - off; delete e.pdfPage; });
+    // 🛡 nothing about a question that is NOT in this task (the AI sometimes invents one) — taken out, and shown to the teacher
+    var qn = hwQuestionNumbers(t), gone = [];
+    if (qn.length) {
+      var okQ = function(label) { var n = hwQNumOf(label); return !n || qn.indexOf(n) !== -1; };
+      fbNew.errors = (fbNew.errors || []).filter(function(e) { if (okQ(e.q)) return true; gone.push(e.q); return false; });
+      fbNew.qtable = (fbNew.qtable || []).filter(function(r) { if (okQ(r.q)) return true; gone.push(r.q); return false; });
+      ['mistakes', 'missed', 'hints', 'skipped'].forEach(function(key) {
+        fbNew[key] = (fbNew[key] || []).filter(function(s) { var lab = String(s).split(':')[0]; if (!/^\s*Q?\.?\s*\d/i.test(lab) || okQ(lab)) return true; gone.push(lab); return false; });
+      });
+    }
+    fbNew._gone = gone.filter(function(x, i, a) { return x && a.indexOf(x) === i; });
     hwPreview.push(hwApplyRedoRule(fbNew, t));    // 🏅 grade + 🔁 automatic redo below the teacher's %
   });
   if (!hwPreview.length) { box.innerHTML = '<p style="color:#fca5a5;">No student of this class was found in the JSON' + (unknown.length ? ' (numbers: ' + esc(unknown.join(', ')) + ')' : '') + '.</p>'; return; }
@@ -15495,7 +15687,7 @@ function hwCheckJson() {
     hwPreview.map(function(f) {
       return '<tr><td><b>' + esc(byId[f.studentId].fullName) + '</b>' + (d.fb[f.studentId] ? '<br><span style="font-size:0.7rem; color:#fcd34d;">replaces old feedback</span>' : '') + '</td>' +
         (k.marks ? '<td>' + (f.marks === null ? '—' : f.marks + ' / ' + t.maxMarks) + '</td>' : '') +
-        '<td style="font-size:0.8rem;">' + esc(f.remark) + '</td><td style="font-size:0.78rem;">' + ((f.errors || []).length ? (f.errors.length + ' errors (' + f.errors.filter(function(e) { return e.page && e.box; }).length + ' with a box) • ') : '') + ((f.qtable || []).length ? f.qtable.length + ' Qs • ' : '') + f.mistakes.length + ' mistakes • ' + f.missed.length + ' missed • ' + f.hints.length + ' hints</td></tr>';
+        '<td style="font-size:0.8rem;">' + esc(f.remark) + (f._gone && f._gone.length ? '<div style="color:#fcd34d; font-size:0.74rem; margin-top:3px;">🛡 Removed — not in this task: ' + esc(f._gone.join(', ')) + '</div>' : '') + '</td><td style="font-size:0.78rem;">' + ((f.errors || []).length ? (f.errors.length + ' errors (' + f.errors.filter(function(e) { return e.page && e.box; }).length + ' with a box) • ') : '') + ((f.qtable || []).length ? f.qtable.length + ' Qs • ' : '') + f.mistakes.length + ' mistakes • ' + f.missed.length + ' missed • ' + f.hints.length + ' hints</td></tr>';
     }).join('') + '</tbody></table></div>' +
     '<button type="button" id="hw-fb-save" class="btn btn-green btn-block" onclick="hwSavePreview()">💾 Save feedback for ' + hwPreview.length + ' student(s)</button>';
 }
@@ -15505,6 +15697,7 @@ async function hwSavePreview() {
   if (btn) btn.disabled = true;
   var ok = 0, made = [];
   for (var i = 0; i < hwPreview.length; i++) {
+    delete hwPreview[i]._gone;
     try { await FBAPI.hwFeedbackSave(hwPreview[i]); ok++; made.push({ t: hwDetail.task, phone: hwPreview[i].studentId, f: hwPreview[i], sub: hwDetail.subs[hwPreview[i].studentId] }); } catch (e) {}
   }
   queueMarkedPages(made);      // 📄 the students' reports are prepared in the background (quick download later)
@@ -17283,7 +17476,7 @@ function examCopyPrompt(testId) {
     'FOR EACH STUDENT:\n' +
     '1. Open the PDF whose file name has their studentId and read EVERY page carefully.\n' +
     '2. For every question find the student\'s answer, compare it with the model answer / solution and give marks from 0 to the full marks of that question. Give partial marks for correct steps; 0 if missing, blank or a wrong method.\n' +
-    '3. If a question is not fully correct, write "mistake": EXACTLY where (which line / step) and what is wrong, quoting what the student wrote, plus what part was left out; and "hint": a worked solution about 80% complete (see HOW TO WRITE A HINT below) — NOT the final answer. Give every question a "verdict" ("correct" | "slip" | "wrong" | "skipped") and a short "note".\n' +
+    '3. If a question is not fully correct, write "mistake": EXACTLY where (which line / step) and what is wrong, quoting what the student wrote, plus what part was left out; and "hint": a worked solution about 90% complete (see HOW TO WRITE A HINT below) — NOT the final answer. Give every question a "verdict" ("correct" | "slip" | "wrong" | "skipped") and a short "note".\n' +
     '4. Write a short "remark" (2 sentences, encouraging, speaking to the student).\n' +
     '5. "resubmit": true if the student should correct the mistakes and upload again (any question below half marks, or missing work); otherwise false.\n' +
     '6. If the PDF is unreadable or the wrong file, give 0 marks and say so in "remark" with "resubmit": true.\n' +

@@ -712,6 +712,13 @@
     .qp-opt.ok { background: #dcfce7; border-color: #22c55e; color: #14532d; }
     .qp-tick { color: #16a34a; font-weight: 900; }
     .qp-ans { margin-top: 10px; font-size: calc(var(--qp) * 0.92); color: #4c1d95; }
+    /* 🔒 locked class-video player */
+    #vp-cover.vp-hole { clip-path: polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, 32% 28%, 32% 72%, 68% 72%, 68% 28%, 32% 28%); }
+    #vp-box:-webkit-full-screen { display: flex; flex-direction: column; width: 100vw; height: 100vh; border-radius: 0 !important; }
+    #vp-box:-webkit-full-screen .vp-stage { flex: 1; padding-top: 0 !important; }
+    #vp-box:fullscreen, #vp-box.vp-full { display: flex; flex-direction: column; width: 100vw; height: 100vh; border-radius: 0 !important; }
+    #vp-box.vp-full { position: fixed; inset: 0; z-index: 99999; height: 100dvh; }
+    #vp-box:fullscreen .vp-stage, #vp-box.vp-full .vp-stage { flex: 1; padding-top: 0 !important; }
     .qp-sol { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #f1f5f9; border-left: 4px solid #94a3b8; font-size: calc(var(--qp) * 0.88); line-height: 1.7; color: #334155; word-break: break-word; white-space: pre-line; }
     .qp-sol-h { font-weight: 800; color: #475569; margin-bottom: 2px; font-size: 0.82em; }
     .q-paper .katex { color: inherit; }
@@ -1505,6 +1512,7 @@ function copyTextSafe(text, successMessage) {
 
 function closeModal() {
   if (typeof stopAdmCam === 'function') stopAdmCam();
+  if (typeof vpStop === 'function') vpStop();
   var m = document.getElementById('row-editor-modal');
   if (m) m.classList.add('hidden');
 }
@@ -3416,7 +3424,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261119185520';
+var APP_BUILD = '20261119205710';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -13549,7 +13557,7 @@ function videoThumb(v) { return 'https://i.ytimg.com/vi/' + encodeURIComponent(v
 // one video card (thumbnail + title); a tap opens the player
 function videoCardHtml(v, admin, isNew) {
   return '<div class="card" style="display:flex; gap:12px; align-items:center; padding:10px; cursor:pointer;" onclick="openVideo(\'' + escA(v.id) + '\')">' +
-    '<div style="position:relative; flex-shrink:0;"><img src="' + videoThumb(v) + '" alt="" loading="lazy" style="width:128px; height:72px; object-fit:cover; border-radius:8px; background:#000;">' +
+    '<div style="position:relative; flex-shrink:0;" oncontextmenu="return false;"><div style="width:128px; height:72px; border-radius:8px; background:#000 url(\'' + videoThumb(v) + '\') center/cover no-repeat; -webkit-touch-callout:none; user-select:none;"></div>' +
       '<span style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.6rem;">▶️</span></div>' +
     '<div style="flex:1; min-width:0;"><b>' + esc(v.title) + '</b>' + (isNew ? ' <span class="badge" style="background:#dc2626; color:#fff;">NEW</span>' : '') +
       '<div style="font-size:0.76rem; color:var(--text-muted); margin-top:2px;">' + (v.chapter ? '📖 ' + esc(v.chapter) + ' • ' : '') + esc(v.cls === 'ALL' ? 'All classes' : v.cls) +
@@ -13558,17 +13566,133 @@ function videoCardHtml(v, admin, isNew) {
     (admin ? '<button type="button" class="btn btn-red btn-sm" onclick="event.stopPropagation(); deleteVideo(\'' + escA(v.id) + '\')">🗑️</button>' : '') +
   '</div>';
 }
-// the player: YouTube inside the app (privacy-enhanced mode, no other channels' suggestions at the end)
+// 🔒 the player: YouTube inside the app, but LOCKED — YouTube's own buttons (title link, Share, Watch later,
+// "Watch on YouTube" logo, YouTube full screen, long-press/right-click "copy link") are all covered by our own
+// layer, and the app's own buttons (play/pause, ±10 s, seek bar, speed, full screen) control the video instead.
+// Full screen is done on our own box, so the cover stays on even in full screen.
+var vp = { player: null, timer: null, apiP: null, dragging: false };
+function vpApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if (vp.apiP) return vp.apiP;
+  vp.apiP = new Promise(function(res, rej) {
+    var prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = function() { if (typeof prev === 'function') try { prev(); } catch (e) {} res(window.YT); };
+    var s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    s.onerror = function() { vp.apiP = null; rej(new Error('yt api')); };
+    document.head.appendChild(s);
+    setTimeout(function() { if (!(window.YT && window.YT.Player)) { vp.apiP = null; rej(new Error('yt timeout')); } }, 15000);
+  });
+  return vp.apiP;
+}
+function vpFmt(s) { s = Math.max(0, Math.floor(s || 0)); var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (x < 10 ? '0' : '') + x; }
+function vpStop() {
+  if (vp.timer) { clearInterval(vp.timer); vp.timer = null; }
+  if (vp.player) { try { vp.player.destroy(); } catch (e) {} vp.player = null; }
+  var box = document.getElementById('vp-box');
+  if (box && box.classList.contains('vp-full')) box.classList.remove('vp-full');
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
+}
+function vpSync() {
+  var p = vp.player; if (!p || !p.getDuration) return;
+  var d = p.getDuration() || 0, t = p.getCurrentTime() || 0, st = p.getPlayerState ? p.getPlayerState() : -1;
+  var bar = document.getElementById('vp-seek'), tm = document.getElementById('vp-time'), pb = document.getElementById('vp-play'), big = document.getElementById('vp-big'), end = document.getElementById('vp-end');
+  if (bar && !vp.dragging && d) { bar.max = Math.floor(d); bar.value = Math.floor(t); }
+  if (tm) tm.textContent = vpFmt(t) + ' / ' + vpFmt(d);
+  var playing = st === 1 || st === 3;
+  if (pb) pb.textContent = playing ? '⏸' : '▶';
+  if (big) big.style.display = playing ? 'none' : 'flex';
+  if (end) end.style.display = st === 0 ? 'flex' : 'none';
+  if (playing) { var c = document.getElementById('vp-cover'); if (c) c.classList.remove('vp-hole'); }
+}
+function vpToggle() {
+  var p = vp.player; if (!p || !p.getPlayerState) return;
+  var st = p.getPlayerState();
+  if (st === 1 || st === 3) p.pauseVideo();
+  else {
+    if (st === 0) p.seekTo(0, true);
+    p.playVideo();
+    // some iPhones only start a video on a tap inside the player itself: then a small opening is made
+    // over YouTube's own ▶ in the middle for that first tap (the edges with the link/Share stay covered)
+    setTimeout(function() {
+      var s2 = vp.player && vp.player.getPlayerState ? vp.player.getPlayerState() : 1;
+      if (s2 !== 1 && s2 !== 3) { var c = document.getElementById('vp-cover'), big = document.getElementById('vp-big'); if (c) c.classList.add('vp-hole'); if (big) big.style.display = 'none'; }
+    }, 1500);
+  }
+  setTimeout(vpSync, 250);
+}
+function vpSkip(sec) { var p = vp.player; if (!p || !p.getCurrentTime) return; p.seekTo(Math.max(0, (p.getCurrentTime() || 0) + sec), true); setTimeout(vpSync, 250); }
+function vpSeekTo(val) { var p = vp.player; vp.dragging = false; if (p && p.seekTo) { p.seekTo(Number(val) || 0, true); setTimeout(vpSync, 250); } }
+function vpSpeed(r) { var p = vp.player; if (p && p.setPlaybackRate) p.setPlaybackRate(Number(r) || 1); }
+function vpFull() {
+  var box = document.getElementById('vp-box'); if (!box) return;
+  var inFs = document.fullscreenElement || document.webkitFullscreenElement || box.classList.contains('vp-full');
+  if (inFs) {
+    box.classList.remove('vp-full');
+    try { if (document.fullscreenElement) document.exitFullscreen(); else if (document.webkitFullscreenElement) document.webkitExitFullscreen(); } catch (e) {}
+    try { screen.orientation.unlock(); } catch (e) {}
+    return;
+  }
+  var req = box.requestFullscreen || box.webkitRequestFullscreen;
+  var css = function() { box.classList.add('vp-full'); };
+  if (req) {
+    try {
+      var r = req.call(box);
+      if (r && r.then) r.then(function() { try { screen.orientation.lock('landscape').catch(function() {}); } catch (e) {} }).catch(css);
+    } catch (e) { css(); }
+  } else css();   // iPhone: the box simply fills the whole screen
+}
 function openVideo(id) {
   var v = videoList().find(function(x) { return x.id === id; });
   if (!v) return;
+  vpStop();
+  var btn = 'background:rgba(255,255,255,0.14); color:#fff; border:0; border-radius:8px; padding:6px 10px; font-size:0.95rem; cursor:pointer; touch-action:manipulation;';
   document.getElementById('row-editor-body').innerHTML =
     '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px;"><h3 style="margin:0; font-size:1rem;">📹 ' + esc(v.title) + '</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
-    '<div style="position:relative; width:100%; padding-top:56.25%; background:#000; border-radius:12px; overflow:hidden;">' +
-      '<iframe src="https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v.ytId) + '?rel=0&modestbranding=1&playsinline=1" title="' + escA(v.title) + '" style="position:absolute; inset:0; width:100%; height:100%; border:0;" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>' +
+    '<div id="vp-box" oncontextmenu="return false;" style="background:#000; border-radius:12px; overflow:hidden; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;">' +
+      '<div class="vp-stage" style="position:relative; width:100%; padding-top:56.25%;">' +
+        '<div id="vp-frame" style="position:absolute; inset:0;"></div>' +
+        // the lock: a see-through cover over the WHOLE YouTube player, so nothing of YouTube can be tapped
+        '<div id="vp-cover" onclick="vpToggle()" style="position:absolute; inset:0; z-index:2; cursor:pointer; background:rgba(0,0,0,0.001);"></div>' +
+        '<div id="vp-big" onclick="vpToggle()" style="position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.35); cursor:pointer;"><span style="width:70px; height:70px; border-radius:50%; background:rgba(220,38,38,0.92); color:#fff; font-size:2rem; display:flex; align-items:center; justify-content:center; padding-left:5px;">▶</span></div>' +
+        '<div id="vp-end" onclick="vpToggle()" style="position:absolute; inset:0; z-index:4; display:none; flex-direction:column; align-items:center; justify-content:center; gap:8px; background:#000; color:#fff; cursor:pointer;"><span style="font-size:2.2rem;">🔁</span><b>Watch again</b></div>' +
+        '<div id="vp-msg" style="position:absolute; inset:0; z-index:5; display:flex; align-items:center; justify-content:center; color:#cbd5e1; font-size:0.85rem; background:#000;">Loading video…</div>' +
+      '</div>' +
+      '<div class="vp-bar" style="display:flex; align-items:center; gap:6px; padding:8px; background:#111827; flex-wrap:wrap;">' +
+        '<button type="button" id="vp-play" onclick="vpToggle()" style="' + btn + ' min-width:42px;">▶</button>' +
+        '<button type="button" onclick="vpSkip(-10)" style="' + btn + '">⏪ 10</button>' +
+        '<button type="button" onclick="vpSkip(10)" style="' + btn + '">10 ⏩</button>' +
+        '<input id="vp-seek" type="range" min="0" max="0" value="0" step="1" oninput="vp.dragging=true; document.getElementById(\'vp-time\').textContent = vpFmt(this.value) + \' / \' + vpFmt(this.max);" onchange="vpSeekTo(this.value)" style="flex:1; min-width:120px; accent-color:#dc2626;">' +
+        '<span id="vp-time" style="color:#e5e7eb; font-size:0.78rem; font-variant-numeric:tabular-nums;">0:00 / 0:00</span>' +
+        '<select onchange="vpSpeed(this.value)" style="background:#1f2937; color:#fff; border:0; border-radius:8px; padding:6px; font-size:0.8rem;"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>' +
+        '<button type="button" onclick="vpFull()" style="' + btn + '">⛶</button>' +
+      '</div>' +
+    '</div>' +
     (v.desc ? '<p style="font-size:0.86rem; margin:10px 0 0 0; white-space:pre-wrap;">' + esc(v.desc) + '</p>' : '') +
-    '<p style="font-size:0.74rem; color:var(--text-muted); margin:8px 0 0 0;">Tip: tap ⛶ in the player for full screen. If the video does not play, check your internet.</p>';
+    '<p style="font-size:0.74rem; color:var(--text-muted); margin:8px 0 0 0;">🔒 This class video can be watched only inside the ACSM app. Tap the video to play / pause, ⛶ for full screen.</p>';
   document.getElementById('row-editor-modal').classList.remove('hidden');
+  var myId = v.ytId;
+  vpApi().then(function(YT) {
+    var holder = document.getElementById('vp-frame');
+    if (!holder || vp.player) return;
+    var inner = document.createElement('div'); inner.id = 'vp-yt'; inner.style.cssText = 'width:100%; height:100%;'; holder.appendChild(inner);
+    vp.player = new YT.Player('vp-yt', {
+      host: 'https://www.youtube-nocookie.com',
+      videoId: myId,
+      width: '100%', height: '100%',
+      playerVars: { controls: 0, disablekb: 1, fs: 0, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0, origin: location.origin },
+      events: {
+        onReady: function() { var m = document.getElementById('vp-msg'); if (m) m.style.display = 'none'; vpSync(); },
+        onStateChange: function() { vpSync(); },
+        onError: function() { var m = document.getElementById('vp-msg'); if (m) { m.style.display = 'flex'; m.textContent = '⚠️ This video could not be played. Please tell Sir.'; } }
+      }
+    });
+    var f = vp.player.getIframe && vp.player.getIframe();
+    if (f) { f.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; border:0;'; f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture'); }
+    vp.timer = setInterval(vpSync, 500);
+  }).catch(function() {
+    var m = document.getElementById('vp-msg'); if (m) m.textContent = '⚠️ The video player could not load. Check your internet and open the video again.';
+  });
 }
 // 🎓 the student's Class Videos page: grouped by chapter, newest first
 function renderStudentVideosHtml(u) {

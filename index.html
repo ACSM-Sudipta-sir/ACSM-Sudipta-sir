@@ -548,6 +548,7 @@
     .tap-btn.red { background: #dc2626; box-shadow: 0 4px 0 #7f1d1d; }
     .tap-btn.green { background: #059669; box-shadow: 0 4px 0 #065f46; }
     .tap-btn.wait { background: #b45309; box-shadow: 0 4px 0 #78350f; }
+    .tap-btn.slate { background: #334155; box-shadow: 0 4px 0 #0f172a; font-size: 0.95rem; }
     .tap-btn:active { filter: brightness(0.85); }
     .tap-btn:disabled { opacity: 0.6; }
     .tap-btn * { pointer-events: none; }
@@ -1526,7 +1527,11 @@ function tapRun(el) {
   if (!el || el.disabled) return;
   var a = el.getAttribute('data-tap'), id = el.getAttribute('data-id') || '';
   tapAct.ranAt = Date.now(); tapAct.ranEl = el;
-  if (a === 'start') openExamConsent(id, true);
+  if (a === 'start') {
+    // the student sees at once that the touch worked
+    if (/START/.test(el.textContent)) { el.textContent = '⏳ Opening…'; setTimeout(function() { if (el.isConnected && /Opening/.test(el.textContent)) el.textContent = '▶ START EXAM'; }, 4000); }
+    openExamConsent(id, true);
+  }
   else if (a === 'go') launchActiveExam();
   else if (a === 'submit') examSubmitTap(el);
 }
@@ -3495,11 +3500,24 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261120125302';
+var APP_BUILD = '20261120182858';
 var updateShownFor = '';
+// ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
+// from the web server's answer and the exam times are judged by it
+var clockOff = 0;
+function clockFromHeader(r, t0) {
+  try {
+    var d = Date.parse(r.headers.get('Date') || ''), t1 = Date.now();
+    if (!d || t1 - t0 > 5000) return;            // a slow answer is not exact enough
+    var off = d + 500 - Math.round((t0 + t1) / 2);   // the header is in whole seconds
+    clockOff = Math.abs(off) > 20000 ? off : 0;  // only a real difference (over 20 s) is used
+  } catch (e) {}
+}
+function nowMs() { return Date.now() + clockOff; }
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
-  fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(function(r) { return r.ok ? r.json() : null; }).then(function(j) {
+  var t0 = Date.now();
+  fetch('version.json?t=' + t0, { cache: 'no-store' }).then(function(r) { clockFromHeader(r, t0); return r.ok ? r.json() : null; }).then(function(j) {
     if (j && j.v && String(j.v) > APP_BUILD) showUpdateBanner(String(j.v));
   }).catch(function() {});
 }
@@ -13214,7 +13232,7 @@ function saveExamFromBuilder() {
 }
 
 function examWindowState(t) {
-  var now = Date.now();
+  var now = nowMs();
   if (!t.startAtMs && !t.endAtMs) return 'open';
   if (t.startAtMs && now < t.startAtMs) return 'upcoming';
   if (t.endAtMs && now > t.endAtMs) return 'closed';
@@ -13310,7 +13328,7 @@ var testsView = 'MCQ';   // the Test page shows one part at a time: 'MCQ' (onlin
 // ---------------- STUDENT: exam list (one attempt, inside the window) ----------------
 var REC_SEG_MS = 60000;      // each recording piece is a separate playable file
 var MAX_WARNINGS = 3;        // 3 warnings, the 4th time the exam is submitted automatically
-var examStarting = false;
+var examStarting = false, examStartingAt = 0;
 var finalizingAttempts = {};
 var attemptWatchTimer = null;
 
@@ -13348,7 +13366,9 @@ function studentExamCardHtml(t) {
     action = '<button type="button" data-tap="start" data-id="' + escA(t.id) + '" class="tap-btn red">▶ START EXAM</button>' +
       '<div style="font-size:0.74rem; color:var(--text-muted); margin-top:6px; text-align:center;">One attempt only' + (t.endAtMs ? ' • window closes in ' + minsLeftText(t.endAtMs - Date.now()) : '') + '</div>';
   } else if (s.key === 'upcoming') {
-    action = '<button type="button" class="btn btn-slate btn-block" disabled>⏳ Opens ' + fmtDateTime(t.startAtMs) + '</button>';
+    // tappable: before the time it says how long to wait; at the time it starts the exam (even if the screen was not refreshed)
+    action = '<button type="button" data-tap="start" data-id="' + escA(t.id) + '" class="tap-btn slate">⏳ Opens ' + fmtDateTime(t.startAtMs) + '</button>' +
+      '<div style="font-size:0.74rem; color:var(--text-muted); margin-top:6px; text-align:center;">This button turns into ▶ START EXAM at that time</div>';
   } else if (s.key === 'closed') {
     action = '<button type="button" class="btn btn-slate btn-block" disabled>Exam closed</button>';
   } else {
@@ -14530,6 +14550,14 @@ setInterval(function() {
   // 📝 an exam that opened just now: the red number on "Tests" appears without a reload
   try { var u0 = currentUser; navBadge('nav-test-badge', sdAssignedTests(u0, u0.studentClass || u0.batch || 'Class 12').filter(function(t) { var k = studentExamStatus(t).key; return k === 'live' || k === 'open'; }).length); } catch (e) {}
 }, 60000);
+// 📝 the exam cards follow the clock: "⏳ Opens 10:00" turns into ▶ START EXAM by itself at 10:00 (without new data)
+setInterval(function() {
+  if (cloud.role !== 'student' || !currentUser || examState || examStarting || document.hidden) return;
+  if (['tests', 'examalert', 'home'].indexOf(studentTab) === -1 || !document.getElementById('view-student-dash').classList.contains('active')) return;
+  var u0 = currentUser, now = sdAssignedTests(u0, u0.studentClass || u0.batch || 'Class 12').map(function(t) { return t.id + ':' + studentExamStatus(t).key; }).join(',');
+  if (now !== stuExamKeys) { stuExamKeys = now; renderStudentDashContent(true); }
+}, 10000);
+var stuExamKeys = '';
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible' && cloud.role === 'student' && currentUser && !examState) setTimeout(function() { if (hwCache) checkStudentMissLock(); else loadHw(true); }, 800);
 });
@@ -16487,9 +16515,19 @@ function prepareStudentPersonalizedQuestions(testObj) {
 // ---------------- consent screen ----------------
 function openExamConsent(testId, fromCard) {
   var t = DB.get(K.T).find(function(x) { return x.id === testId; });
-  if (!t) return;
-  if (examState || examStarting) return;
+  if (!t) { showToast('This exam is loading — wait 2 seconds and touch again.', 'error'); renderStudentDashContent(true); return; }
+  if (examState) { if (!document.getElementById('view-exam').classList.contains('active')) showScreen('view-exam'); return; }
+  // a start that hung (no answer from the phone / internet) never blocks the button for ever
+  if (examStarting && Date.now() - (examStartingAt || 0) > 50000) examStarting = false;
+  if (examStarting) { showToast('⏳ Your exam is opening — please wait…'); return; }
   var s = studentExamStatus(t);
+  if (s.key === 'upcoming') {
+    var w = Math.max(1, Math.ceil((t.startAtMs - nowMs()) / 60000));
+    showToast('⏳ This exam opens at ' + fmtDateTime(t.startAtMs) + ' — in ' + (w >= 60 ? minsLeftText(w * 60000) : w + ' min') + '. Touch START again then.', 'error');
+    return;
+  }
+  // the card was old (drawn before the exam opened): it is redrawn as ▶ START EXAM
+  if (fromCard && (s.key === 'live' || s.key === 'open')) setTimeout(function() { if (!examState && !examStarting && document.getElementById('view-student-dash').classList.contains('active')) renderStudentDashContent(true); }, 3000);
   if (s.key === 'done') { showToast('You have already completed this exam.', 'error'); return; }
   if (s.key === 'finishing') {
     var oa = s.att || {};
@@ -16792,9 +16830,11 @@ function withTimeout(p, ms, onSlow) {
   });
 }
 async function launchActiveExam() {
-  if (!currentTest || examStarting) return;
+  if (!currentTest) return;
+  if (examStarting && Date.now() - (examStartingAt || 0) > 50000) examStarting = false;   // an old start that hung
+  if (examStarting) return;
   var t = currentTest;
-  examStarting = true;
+  examStarting = true; examStartingAt = Date.now();
   var btn = document.getElementById('start-exam-btn'), note = document.getElementById('start-exam-note');
   var say = function(m) { if (btn) btn.textContent = m; };
   var sayNote = function(m) { if (note) note.innerHTML = m; };

@@ -3529,7 +3529,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261120190339';
+var APP_BUILD = '20261120222827';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -16377,10 +16377,10 @@ function renderStudentHwHtml(u) {
       var lateSub = s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0);
       status = '<div style="background:rgba(220,38,38,0.12); border:1px solid #dc2626; border-radius:10px; padding:10px 12px; color:#fca5a5;"><b>❌ Not submitted</b>' + (f.remark ? '<div style="color:#fecaca; margin-top:4px;">💬 ' + esc(f.remark) + '</div>' : '') +
         (!lateSub && (f.lockWarn || missLockWarnText()) ? '<div class="blink-live" style="margin-top:8px; padding:8px 10px; border-radius:8px; background:#7f1d1d; color:#fff; font-weight:700;">' + esc(f.lockWarn || missLockWarnText()) + '</div>' : '') +
-        (lateSub ? '<div style="color:#86efac; margin-top:6px;">📤 Submitted later on ' + fmtDateTime(s.uploadedAt) + ' — your teacher will check it.</div>' : (hwCanUpload(t) ? '<button type="button" class="btn btn-purple btn-sm" style="margin-top:8px;" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Submit it now (PDF)</button>' : '')) + '</div>';
+        (lateSub ? '<div style="color:#86efac; margin-top:6px;">📤 Submitted later on ' + fmtDateTime(s.uploadedAt) + ' — your teacher will check it.</div>' + hwChangeBoxHtml(t, s) :(hwCanUpload(t) ? '<button type="button" class="btn btn-purple btn-sm" style="margin-top:8px;" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Submit it now (PDF)</button>' : '')) + '</div>';
     } else if (s) {
-      status = '<div class="hw-done"><span class="hw-done-tick">✅ Submitted</span><span>' + fmtDateTime(s.uploadedAt) + (s.late ? ' <span class="badge badge-hard">late</span>' : '') + ' — waiting for your teacher to check it.</span></div>' +
-        (hwCanUpload(t) ? '<button type="button" class="btn btn-slate btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">🔁 Replace PDF</button>' : '');
+      status = '<div class="hw-done"><span class="hw-done-tick">✅ Submitted</span><span>' + fmtDateTime(s.uploadedAt) + (s.late ? ' <span class="badge badge-hard">late</span>' : '') + (s.changed ? ' <span class="badge" style="background:#1e293b; color:#93c5fd;">changed ' + s.changed + '×</span>' : '') + ' — waiting for your teacher to check it.</span></div>' +
+        hwChangeBoxHtml(t, s);
     } else if (hwNotOpenYet(t)) {
       status = '<div style="background:rgba(59,130,246,0.12); border:1px solid #3b82f6; border-radius:10px; padding:10px 12px; color:#bfdbfe;">🔒 Submission opens on <b>' + fmtDateTime(t.openAtMs) + '</b>' + (t.dueAtMs ? ' and closes on <b>' + fmtDateTime(t.dueAtMs) + '</b>' : '') + '. Do the work now — the upload button comes at the opening time.</div>';
     } else if (over && !hwLateOk(t) && hwGateTaskIds().indexOf(t.id) === -1) {
@@ -16414,14 +16414,32 @@ function openHwQuestion(id) {
   openPdfViewer(t.title, HW_KINDS[hwKind(t)].icon, function() { return FBAPI.hwQuestionGet(id); });
 }
 
-var hwUploadTask = '';
-function hwPickFile(taskId) {
+// ✏️ a wrong PDF can be changed until the teacher checks the copy (also after the closing time)
+function hwCanChange(t, s) {
+  if (!s) return false;
+  var f = hwMineCache && hwMineCache.fb[t.id];
+  if (f && f.status === 'checked') return false;                                       // checked: no more changes
+  if (f && f.status === 'missing' && !(Number(s.uploadedAt || 0) > Number(f.checkedAt || 0))) return false;
+  return true;
+}
+function hwChangeBoxHtml(t, s) {
+  if (!hwCanChange(t, s)) return '';
+  return '<div style="margin-top:8px; padding:9px 11px; border-radius:10px; background:rgba(59,130,246,0.10); border:1px dashed #3b82f6;">' +
+    '<div style="font-size:0.82rem; color:#bfdbfe; margin-bottom:6px;">📄 Sent: <b>' + esc(s.name || 'your PDF') + '</b>' + (s.sizeKb ? ' (' + (s.sizeKb >= 1024 ? (s.sizeKb / 1024).toFixed(1) + ' MB' : s.sizeKb + ' KB') + ')' : '') + '<br>' +
+      'Uploaded the <b>wrong PDF</b> by mistake? You can change it until your teacher checks it.</div>' +
+    '<button type="button" class="btn btn-blue btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\', true)">✏️ Change PDF (upload the right one)</button></div>';
+}
+var hwUploadTask = '', hwChanging = false;
+function hwPickFile(taskId, change) {
   hwUploadTask = taskId;
   var t = (hwCache || []).find(function(x) { return x.id === taskId; });
   if (!t || !currentUser) return;
-  // ⏰ outside the teacher's window (a correction the teacher asked for is always allowed)
+  var s0 = hwMineCache && hwMineCache.subs[t.id];
+  hwChanging = !!(change && hwCanChange(t, s0));
+  if (change && !hwChanging) { showToast('Your teacher has already checked this copy — it cannot be changed now.', 'error'); return; }
+  // ⏰ outside the teacher's window (a correction the teacher asked for is always allowed; so is changing a wrong PDF before it is checked)
   var fb = hwMineCache && hwMineCache.fb[t.id];
-  if (!(fb && fb.status === 'checked' && fb.resubmit) && !hwCanUpload(t)) {
+  if (!hwChanging && !(fb && fb.status === 'checked' && fb.resubmit) && !hwCanUpload(t)) {
     showToast(hwNotOpenYet(t) ? '🔒 Submission opens on ' + fmtDateTime(t.openAtMs) + '.' : '⛔ Submission closed on ' + fmtDateTime(t.dueAtMs) + '.', 'error');
     return;
   }
@@ -16436,6 +16454,10 @@ async function hwUploadData(t, data, name) {
   var cls = currentUser.studentClass || currentUser.batch || '';
   var drive = driveForClass(cls);
   var meta = { id: t.id + '_' + currentUser.id, taskId: t.id, studentId: currentUser.id, studentName: currentUser.fullName || '', cls: cls, name: name, sizeKb: Math.round(data.length * 0.75 / 1024), uploadedAt: Date.now(), late: hwOverdue(t) };
+  // ✏️ changing a wrong PDF: a copy first sent in time stays "in time" (the change is only a correction)
+  var prev = hwMineCache && hwMineCache.subs[t.id], changing = hwChanging && prev;
+  hwChanging = false;
+  if (changing) { meta.late = !!prev.late; meta.firstAt = prev.firstAt || prev.uploadedAt; meta.changed = Number(prev.changed || 0) + 1; }
   var viaDrive = false;
   if (drive) {
     // into the teacher's Google Drive: Homework / Class / Year / Task / Name_number_task.pdf
@@ -16454,7 +16476,8 @@ async function hwUploadData(t, data, name) {
   else await FBAPI.hwUpload(meta, data);
   var wasGated = !!stuGate();
   hwMineCache.subs[t.id] = meta;
-  thankAfterUpload(HW_KINDS[hwKind(t)].title, t.title);
+  if (changing) showToast('✅ PDF changed — your teacher will check the new one.', 'success');
+  else thankAfterUpload(HW_KINDS[hwKind(t)].title, t.title);
   renderStudentDashContent();
   if (wasGated && !stuGate()) setTimeout(function() { showToast('🔓 All pending work is submitted — your portal is open again!', 'success'); }, 1500);
 }

@@ -528,12 +528,14 @@
     /* student portal protection (no copy / print; blurred when the app is not in front; name watermark) */
     body.stu-guard, body.stu-guard * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
     body.stu-guard textarea, body.stu-guard input { -webkit-user-select: text; user-select: text; }
-    body.stu-guard img { -webkit-user-drag: none; pointer-events: auto; }
+    body.stu-guard img { -webkit-user-drag: none; }
     body.stu-shield .view-section { filter: blur(22px); }
     @media print { body.stu-guard { display: none !important; } }
     #stu-wm { position: fixed; top: -20%; left: -20%; right: -20%; bottom: -20%; z-index: 9300; pointer-events: none; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 70px 90px; padding: 40px; transform: rotate(-24deg); opacity: 0.045; color: #fff; font: 700 14px/1 system-ui, sans-serif; white-space: nowrap; user-select: none; }
     body.exam-locked #stu-wm { display: none; }
     /* the institute logo as a faint background on every student screen (above the cards, so it is always seen) */
+    /* the faint logo lies OVER the screen: it must never catch a touch (else the buttons under it, e.g. START EXAM, do nothing) */
+    #stu-logo-bg, #stu-logo-bg * { pointer-events: none !important; }
     #stu-logo-bg { position: fixed; inset: 0; z-index: 9250; pointer-events: none; display: flex; align-items: center; justify-content: center; }
     #stu-logo-bg img { width: min(70vw, 70vh, 560px); aspect-ratio: 1 / 1; object-fit: contain; border-radius: 50%; clip-path: circle(48% at 50% 50%); opacity: 0.08; filter: grayscale(20%); user-select: none; -webkit-user-drag: none; }
     @media print { #stu-logo-bg { display: none; } }
@@ -1667,12 +1669,37 @@ function newHwSubs(taskId) {
   var m = hwSeenMap();
   return hwSubsLive.filter(function(s) { return (!taskId || s.taskId === taskId) && Number(s.uploadedAt || 0) > Number(m[s.taskId] || m._base); });
 }
-function newExamSubs() {
-  var at = examSeenAt();
-  return DB.get(K.S).filter(function(s) { return Number(s.submittedAtMs || 0) > at; });
+// exams: "seen" is kept per exam — a copy stays NEW until the teacher opens that exam's results (or ✔ Seen)
+function examSeenMap() {
+  var m = seenGet('acsm_seen_exam2');
+  if (!m || !m._base) { m = { _base: examSeenAt() }; seenSet('acsm_seen_exam2', m); }
+  return m;
+}
+function subTimeMs(s) { return Number(s.submittedAtMs || s.sheetUploadedAt || 0) || Date.parse(s.submittedAt || s.date || '') || 0; }
+function newExamSubs(testId) {
+  var m = examSeenMap();
+  return DB.get(K.S).filter(function(s) { return (!testId || s.testId === testId) && subTimeMs(s) > Number(m[s.testId] || m._base); });
 }
 function markHwSeen(taskId) { var m = hwSeenMap(); m[taskId] = Date.now(); seenSet('acsm_seen_hw', m); updateWorkAlerts(); }
-function markExamSeen() { seenSet('acsm_seen_exam', Date.now()); updateWorkAlerts(); }
+function markExamSeen(testId) {
+  if (!testId) return;    // opening the Exams page alone does not clear the counts any more
+  var m = examSeenMap(); m[testId] = Date.now(); seenSet('acsm_seen_exam2', m); updateWorkAlerts();
+  var bc = document.getElementById('admin-body-content');
+  if (bc && bc.querySelector('[data-tests-page]')) renderAdminTestsContent();
+}
+// a new copy came in while the teacher is on the Exams page: the counts on the cards follow at once
+var examCntWait = null;
+function refreshExamCounts() {
+  clearTimeout(examCntWait);
+  examCntWait = setTimeout(function() {
+    var bc = document.getElementById('admin-body-content');
+    if (!bc || !bc.querySelector('[data-tests-page]')) return;
+    if (!document.getElementById('row-editor-modal').classList.contains('hidden')) return;   // not while a window is open
+    var y = window.scrollY;
+    renderAdminTestsContent();
+    window.scrollTo(0, y);
+  }, 800);
+}
 function setMenuDot(btnId, n, title) {
   var b = document.getElementById(btnId);
   if (!b) return;
@@ -2341,7 +2368,7 @@ window.onCloudData = function(name, arr, pending) {
   Store.mem[k] = JSON.stringify(arr);
   if (name === 'fees') updateFeeCorner();
   if (name === 'submissions' || name === 'users' || name === 'tests') scheduleClassStats();
-  if (name === 'submissions' && cloud.role === 'admin') updateWorkAlerts();
+  if (name === 'submissions' && cloud.role === 'admin') { updateWorkAlerts(); refreshExamCounts(); }
   if (!pending && cloud.ready) refreshLiveViews();
 };
 
@@ -3500,7 +3527,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261120182858';
+var APP_BUILD = '20261120185746';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -4120,7 +4147,6 @@ function switchAdminTab(tab) {
   if (emailEl && currentUser && currentUser.email) emailEl.textContent = currentUser.email;
   jeeMode = tab.indexOf('jee-') === 0;
   // Test → two parts: online (MCQ) and subjective
-  if (/^tests|^jee-tests/.test(tab)) markExamSeen();   // the teacher is looking at the results now
   if (tab === 'tests-mcq') testsView = 'MCQ';
   else if (tab === 'tests-subj') testsView = 'Subjective';
   var tabs = ['home', 'dash', 'notices', 'inputq', 'qbank', 'tests', 'tests-mcq', 'tests-subj', 'jee', 'students', 'fees', 'results', 'analytics', 'hw', 'pyq', 'videos', 'formula', 'drive', 'backup', 'chat', 'devices', 'books', 'ranker', 'complaints'];
@@ -13261,6 +13287,15 @@ function renderAdminTestsContent() {
     var stBadge = st === 'live' ? '<span class="badge badge-easy">● Live now</span>' : (st === 'upcoming' ? '<span class="badge badge-medium">⏳ Upcoming</span>' : (st === 'closed' ? '<span class="badge" style="background:#334155;">Closed</span>' : '<span class="badge" style="background:#334155;">No schedule</span>'));
     var fmt = t.examFormatMode === 'MCQ' ? 'MCQ' : (t.examFormatMode === 'Subjective' ? 'Subjective' : 'Mixed');
     var n = subs.filter(function(s) { return s.testId === t.id; }).length;
+    var nNew = newExamSubs(t.id).length;
+    // 📥 the copies at a glance: how many came in, how many are NEW (not looked at yet)
+    var inBar = '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; padding:8px 10px; border-radius:10px; background:' + (nNew ? 'rgba(220,38,38,0.16); border:1px solid #dc2626;' : 'rgba(30,41,59,0.6); border:1px solid #334155;') + '">' +
+      '<span style="font-weight:800; color:#e2e8f0;">📥 ' + n + ' submitted</span>' +
+      (nNew ? '<span class="blink-live" style="font-weight:900; color:#fff; background:#dc2626; padding:2px 10px; border-radius:999px;">🔴 ' + nNew + ' NEW</span>' +
+              '<span style="font-size:0.78rem; color:#cbd5e1;">' + (n - nNew) + ' already seen</span>' +
+              '<button type="button" class="btn btn-slate btn-xs" style="margin-left:auto;" onclick="markExamSeen(\'' + escA(t.id) + '\')" title="Clear the NEW count without opening the results">✔ Seen</button>'
+            : (n ? '<span style="font-size:0.78rem; color:#6ee7b7;">✔ all seen</span>' : '<span style="font-size:0.78rem; color:var(--text-muted);">none yet</span>')) +
+    '</div>';
     return '<div class="card card-red">' +
       '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap;">' +
         '<h3 style="margin:0 0 4px 0;">' + esc(t.title) + '</h3>' + stBadge +
@@ -13276,13 +13311,13 @@ function renderAdminTestsContent() {
         (t.startAtMs ? '🗓 ' + fmtDateTime(t.startAtMs) + ' → ' + fmtDateTime(t.endAtMs) + '<br>' : '') +
         (t.chapters && t.chapters.length ? '📚 ' + esc(t.chapters.join(', ')) + '<br>' : '📚 All chapters<br>') +
         '👥 Attempted by <b>' + n + '</b> student(s)' +
-      '</div>' +
+      '</div>' + inBar +
       '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
         '<button type="button" onclick="openExamBuilderModal(\'' + escA(t.id) + '\')" class="btn btn-amber btn-sm">✏️ Edit</button>' +
         '<button type="button" onclick="openTestQuestions(\'' + escA(t.id) + '\')" class="btn btn-purple btn-sm">👁️ Questions (' + (t.questions || []).length + ')</button>' +
         '<button type="button" onclick="testQuestionsPdf(\'' + escA(t.id) + '\', false)" class="btn btn-slate btn-sm">📄 PDF</button>' +
         (function() { var bad = (t.questions || []).filter(function(q) { return keyCheck(q); }).length; return bad ? '<button type="button" onclick="openKeyFixAll()" class="btn btn-amber btn-sm blink-live">⚠️ ' + bad + ' answer key(s) wrong? Fix</button>' : ''; })() +
-        '<button type="button" onclick="resultsTestFilter=\'' + escA(t.id) + '\'; switchAdminTab(\'results\')" class="btn btn-teal btn-sm">📊 Results</button>' +
+        '<button type="button" onclick="markExamSeen(\'' + escA(t.id) + '\'); resultsTestFilter=\'' + escA(t.id) + '\'; switchAdminTab(\'results\')" class="btn btn-teal btn-sm">📊 Results' + (nNew ? ' (🔴 ' + nNew + ' new)' : '') + '</button>' +
         '<button type="button" onclick="deleteTest(\'' + escA(t.id) + '\')" class="btn btn-red btn-sm">🗑️ Delete</button>' +
       '</div></div>';
   };
@@ -13314,9 +13349,10 @@ function renderAdminTestsContent() {
     }).join('') + '</select></div>';
   if (testsCls !== 'ALL') tests = tests.filter(function(t) { return (t.targetBatch || 'ALL') === testsCls; });
   var mcqList = tests.filter(function(t) { return !isPaperExam(t); }), subjList = tests.filter(isPaperExam);
+  var newIn = function(list) { var k = 0; list.forEach(function(t) { k += newExamSubs(t.id).length; }); return k ? ' <span class="blink-live" style="background:#dc2626; color:#fff; border-radius:999px; padding:1px 7px; font-size:0.74rem; font-weight:900;">🔴 ' + k + ' new</span>' : ''; };
   var tabsHtml = clsBar + '<div class="view-switch" style="margin-bottom:12px;">' +
-    '<span class="part-tab ' + (testsView === 'MCQ' ? 'active' : '') + '" onclick="switchAdminTab(\'tests-mcq\')">🖥️ Online / MCQ Test <span class="part-count">' + mcqList.length + '</span></span>' +
-    '<span class="part-tab ' + (testsView === 'Subjective' ? 'active' : '') + '" onclick="switchAdminTab(\'tests-subj\')">✍️ Subjective Test <span class="part-count">' + subjList.length + '</span></span>' +
+    '<span class="part-tab ' + (testsView === 'MCQ' ? 'active' : '') + '" onclick="switchAdminTab(\'tests-mcq\')">🖥️ Online / MCQ Test <span class="part-count">' + mcqList.length + '</span>' + newIn(mcqList) + '</span>' +
+    '<span class="part-tab ' + (testsView === 'Subjective' ? 'active' : '') + '" onclick="switchAdminTab(\'tests-subj\')">✍️ Subjective Test <span class="part-count">' + subjList.length + '</span>' + newIn(subjList) + '</span>' +
   '</div>';
   document.getElementById('admin-body-content').innerHTML = tabsHtml + (testsView === 'Subjective'
     ? section('✍️ Subjective Test (answer sheet PDF)', 'Students see the questions, write in their notebook and upload ONE PDF after submitting. They see the solutions after the upload; you give the marks from “Results”.', 'Subjective', '+ Create Subjective Test', subjList)

@@ -3529,7 +3529,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261120222827';
+var APP_BUILD = '20261120235021';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -5195,6 +5195,99 @@ async function deleteTest(tid) {
 // ---- 👁️ the questions of an exam: see them, take out a hard one, print / save as PDF ----
 function testQText(q) { return (q && (q.text || q.question || q.questionText)) || ''; }
 
+// ---- 🔧 "show that A = B" as an MCQ gives the answer away: it becomes "find A" (B stays only in the options) ----
+// e.g. "If \(y=\log[…]\), show that \(\frac{dy}{dx}=\frac{-1}{2\sqrt{x^2-1}}\)." → "If \(y=\log[…]\), find \(\frac{dy}{dx}\)."
+function mcqStemFix(text) {
+  var s = String(text || '');
+  var m = s.match(/(,?\s*(?:then\s+)?)(show|prove|verify|establish|deduce)\s+that\s*/i);
+  if (!m) return s;
+  var at = m.index, rest = s.slice(at + m[0].length), math, after, open = '', close = '';
+  var d = [['\\(', '\\)'], ['\\[', '\\]'], ['$$', '$$'], ['$', '$']].find(function(p) { return rest.indexOf(p[0]) === 0; });
+  if (d) {
+    var e = rest.indexOf(d[1], d[0].length);
+    if (e === -1) return s;
+    open = d[0]; close = d[1]; math = rest.slice(d[0].length, e); after = rest.slice(e + d[1].length);
+  } else {
+    var stop = rest.search(/[.;](\s|$)/);
+    math = stop === -1 ? rest : rest.slice(0, stop); after = stop === -1 ? '' : rest.slice(stop);
+  }
+  // the first "=" that is not inside { } ( ) [ ] — the part before it is what is asked
+  var depth = 0, eq = -1;
+  for (var i = 0; i < math.length; i++) {
+    var c = math[i];
+    if (c === '{' || c === '(' || c === '[') depth++;
+    else if (c === '}' || c === ')' || c === ']') depth = Math.max(0, depth - 1);
+    else if (c === '=' && depth === 0 && math[i - 1] !== '\\' && math[i - 1] !== '<' && math[i - 1] !== '>' && math[i - 1] !== '!') { eq = i; break; }
+  }
+  if (eq <= 0) return s;
+  var lhs = math.slice(0, eq).trim();
+  if (!lhs || /^\\?(?:therefore|because)$/.test(lhs)) return s;
+  // without maths signs \( \) the part must look like maths, not a sentence ("the function f is continuous at x")
+  if (!open && (lhs.match(/[A-Za-z]{3,}/g) || []).some(function(w) { return !/^(sin|cos|tan|cot|sec|cosec|log|ln|lim|exp|dx|dy)$/i.test(w); })) return s;
+  // "x dy/dx + y = 0", "(1-x^2) y'' - x y' = 0": "find the value of …"; a plain dy/dx, f'(x), d²y/dx² …: "find …"
+  var plain = /^(\\frac\s*\{\s*d(\^?\{?2\}?)?\s*y\s*\}\s*\{\s*d\s*x(\^?\{?2\}?)?\s*\}|\\dfrac\s*\{\s*d(\^?\{?2\}?)?\s*y\s*\}\s*\{\s*d\s*x(\^?\{?2\}?)?\s*\}|dy\/dx|d\^?2y\/dx\^?2|y'+|[a-zA-Z]'+\s*\(\s*[a-z0-9]*\s*\)|[a-zA-Z]_\{?\d+\}?)$/.test(lhs.replace(/\s+/g, ' '));
+  var before = s.slice(0, at).replace(/[\s,]+$/, '');
+  var tail = after.replace(/^\s*[.]?/, '');
+  var ask = (before ? ', find ' : 'Find ') + (plain ? '' : 'the value of ') + (open ? open + lhs + close : lhs) + '.' + (tail ? ' ' + tail.trim() : '');
+  return before + ask;
+}
+// a question that would give its own answer away as an MCQ (has options + "show that A = B")
+function mcqStemNeedsFix(q) { return !!q && Array.isArray(q.options) && q.options.filter(Boolean).length >= 2 && q.qType !== 'Subjective' && mcqStemFix(testQText(q)) !== testQText(q); }
+function mcqStemApply(q) {
+  var t = testQText(q), n = mcqStemFix(t);
+  if (n === t) return false;
+  if (!q.textOrig) q.textOrig = t;
+  q.text = n;
+  return true;
+}
+// the teacher's one-tap fix: every such question in the Question Bank and in the exams
+function stemFixList() {
+  var out = [];
+  DB.get(K.QB).forEach(function(q) { if (mcqStemNeedsFix(q)) out.push({ src: 'qb', id: q.id, from: testQText(q), to: mcqStemFix(testQText(q)) }); });
+  DB.get(K.T).forEach(function(t) {
+    (t.questions || []).forEach(function(q, i) { if (mcqStemNeedsFix(q)) out.push({ src: 't', tid: t.id, i: i, id: q.id, title: t.title, from: testQText(q), to: mcqStemFix(testQText(q)) }); });
+  });
+  return out;
+}
+function openStemFix() {
+  var list = stemFixList();
+  var nq = list.filter(function(x) { return x.src === 'qb'; }).length, nt = list.length - nq;
+  var shown = {}, rows = list.filter(function(x) { if (shown[x.from]) return false; shown[x.from] = 1; return true; }).slice(0, 80);
+  document.getElementById('row-editor-body').innerHTML =
+    '<h3 style="margin:0 0 4px 0;">🔧 MCQ questions that give the answer away</h3>' +
+    '<p style="margin:0 0 10px 0; font-size:0.82rem; color:var(--text-muted);">“Show that … = <i>answer</i>” as an MCQ tells the student the right option. They are changed to “<b>find …</b>” — the answer stays only in the options and the solution.<br>' +
+      '<b>' + nq + '</b> in the Question Bank' + (nt ? ' • <b>' + nt + '</b> in exams already set' : '') + '. Students who already wrote an exam keep their papers and marks.</p>' +
+    (list.length ? '<div style="max-height:56vh; overflow:auto;">' + rows.map(function(x) {
+      return '<div style="border:1px solid #334155; border-radius:10px; padding:8px 10px; margin-bottom:7px; background:#0f172a; font-size:0.86rem;">' +
+        '<div style="color:#fca5a5;"><b>Now:</b> ' + mx(x.from) + '</div>' +
+        '<div style="color:#6ee7b7; margin-top:4px;"><b>New:</b> ' + mx(x.to) + '</div></div>';
+    }).join('') + (list.length > rows.length ? '<p style="font-size:0.78rem; color:var(--text-muted);">… and more</p>' : '') + '</div>'
+      : '<p style="color:#6ee7b7;">✔ Nothing to fix — no MCQ gives its answer away.</p>') +
+    '<div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">' +
+      '<button type="button" class="btn btn-slate" onclick="closeModal()">Close</button>' +
+      (list.length ? '<button type="button" class="btn btn-green" onclick="stemFixGo()">🔧 Fix all ' + list.length + '</button>' : '') + '</div>';
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+  renderMath(document.getElementById('row-editor-body'));
+}
+function stemFixGo() {
+  var qb = DB.get(K.QB), nq = 0, nt = 0;
+  qb.forEach(function(q) { if (mcqStemNeedsFix(q) && mcqStemApply(q)) { q.fixedAt = Date.now(); nq++; } });
+  if (nq) DB.set(K.QB, qb);
+  var tests = DB.get(K.T), touched = false;
+  tests.forEach(function(t) { (t.questions || []).forEach(function(q) { if (mcqStemNeedsFix(q) && mcqStemApply(q)) { nt++; touched = true; } }); });
+  if (touched) DB.set(K.T, tests);
+  closeModal();
+  if (currentAdminTab === 'qbank') renderAdminQBankContent();
+  var bc = document.getElementById('admin-body-content');
+  if (bc && bc.querySelector('[data-tests-page]')) renderAdminTestsContent();
+  showToast('🔧 Fixed: ' + nq + ' in the Question Bank' + (nt ? ', ' + nt + ' in exams' : '') + '. They now ask “find …”.', 'success');
+}
+function stemFixBanner() {
+  var n = stemFixList().length;
+  return n ? '<div class="fig-only-bar" style="border-color:#f59e0b; background:rgba(245,158,11,0.12); color:#fde68a;">⚠️ <b>' + n + '</b> MCQ question(s) say “show that … = answer” — the answer is visible in the question.' +
+    '<button type="button" class="btn btn-amber btn-sm" style="margin-left:auto;" onclick="openStemFix()">🔧 See &amp; fix</button></div>' : '';
+}
+
 // ---- ⚠️ answer-key check: the solution's last value vs the marked option ----
 // e.g. solution "... Sum = log_{abc} abc = 1." but the key says C) 0 → the key is probably wrong (A) 1 is right)
 function keyNorm(s) {
@@ -5861,6 +5954,7 @@ function openTestQuestions(tid) {
       (per < qs.length ? ' • each student gets <b>' + per + '</b> of them (picked at random)' : '') +
       ' • the right option is green ✔ — if it is wrong, <b>tap the right option</b> (students are re-marked). Press <b>🔄 Replace</b> to swap a question for another one from the Question Bank, or <b>✕ Remove</b> to take it out.' +
       (qs.some(keyCheck) ? '<br><span style="color:#fbbf24; font-weight:700;">⚠️ ' + qs.filter(keyCheck).length + ' question(s) look like the answer key is wrong — see the yellow boxes.</span>' : '') +
+      (qs.some(mcqStemNeedsFix) ? '<br><span style="color:#fbbf24; font-weight:700;">⚠️ ' + qs.filter(mcqStemNeedsFix).length + ' MCQ question(s) say “show that … = answer”. <a href="#" style="color:#fde68a;" onclick="openStemFix(); return false;">🔧 Fix them</a></span>' : '') +
       (n ? '<br><span style="color:#fcd34d;">⚠️ ' + n + ' student(s) already wrote this exam — their papers and marks stay as they are; only the students who start after this get the new set.</span>' : '') + '</p>' +
     '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">' +
       '<button type="button" class="btn btn-teal btn-sm" onclick="testQuestionsPdf(\'' + escA(tid) + '\', false)">📄 Question paper PDF</button>' +
@@ -6002,6 +6096,7 @@ function tqPickUse(qid) {
   c.qType = subj ? 'Subjective' : 'MCQ';
   c.difficulty = bq.difficulty === 'Easy' || bq.difficulty === 'Hard' ? bq.difficulty : 'Medium';
   c.marks = old ? Number(old.marks || 0) : Number(subj && mixed ? (t.subjMarks || 4) : (t.defaultMarksPerQ || 2));
+  if (!subj && hasOptions(c)) mcqStemApply(c);
   if (old) {
     t.questions[p.i] = c;
   } else {
@@ -12446,7 +12541,7 @@ function renderAdminQBankContent() {
   // Class → its chapters (cards) → the questions of one chapter
   var classCol = CLASS_COLORS[Math.max(0, parts.indexOf(activePartition)) % CLASS_COLORS.length];
   var showChapterCards = activePartition !== 'ALL' && qbChapter === 'ALL' && !qbSearchQuery && !qbFigOnly && !qbKeyOnly;
-  var chapterBar = '';
+  var chapterBar = qbStillLoading() ? '' : stemFixBanner();
   if (qbStillLoading()) chapterBar += '<div class="fig-only-bar" style="border-color:#3b82f6; background:rgba(59,130,246,0.12); color:#bfdbfe;">⏳ Loading your questions… they appear here in a moment.</div>';
   if (qbFigOnly) {
     var nFigLeft = inClass.filter(function(q) { return q.needsFigure && !q.hasImage && (qbChapter === 'ALL' || chapterOf(q) === qbChapter); }).length;
@@ -13219,6 +13314,8 @@ function saveExamFromBuilder() {
     reN = selected.filter(function(c) { return oldIds[c.id]; }).length;
   }
   if (reN) setTimeout(function() { showToast('ℹ️ Not enough NEW questions in these chapters — ' + reN + ' question(s) were taken from earlier exams (the ones used longest ago). Add more questions to the bank to avoid this.', 'error'); }, 1200);
+  // 🔧 an MCQ never shows its own answer ("show that … = answer" → "find …")
+  (selected || []).forEach(function(c) { if (c.qType !== 'Subjective' && hasOptions(c)) mcqStemApply(c); });
   var tests = DB.get(K.T);
   var testObj = {
     id: st.editingTestId || ('test_' + Date.now()),

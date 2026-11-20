@@ -3495,7 +3495,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261119234233';
+var APP_BUILD = '20261120080633';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -14771,7 +14771,7 @@ async function reloadHwDetail(selectNew) {
     var f = hwDetail.fb[p];
     var sb = hwDetail.subs[p];
     // (a copy uploaded again AFTER the check is skipped: the boxes belong to the copy that was checked)
-    var need = galleryDrive() ? (!f.chkId || (f.chkV || 1) < 2) : (fbHasBoxes(f) && !f.pgKey);
+    var need = galleryDrive() ? (!f.chkId || (f.chkV || 1) < CHK_V) : (fbHasBoxes(f) && !f.pgKey);
     if (f.status === 'checked' && need && sb && Number(sb.uploadedAt || 0) <= Number(f.checkedAt || 0) && !hwPgQueue.some(function(x) { return x.t.id === t.id && x.phone === p; })) todo.push({ t: t, phone: p, f: f, sub: sb });
   });
   if (todo.length) { showToast('📄 Preparing the marked pages of ' + todo.length + ' checked cop' + (todo.length === 1 ? 'y' : 'ies') + ' for the students (in the background)…', 'success'); queueMarkedPages(todo); }
@@ -15315,7 +15315,7 @@ async function hwBuildCheckedPdf(fileData, errors) {
     var bytes = Uint8Array.from(atob(String(fileData).split(',')[1] || ''), function(c) { return c.charCodeAt(0); });
     doc = await L.PDFDocument.load(bytes, { ignoreEncryption: true });
   }
-  var pages = doc.getPages(), font = await doc.embedFont(L.StandardFonts.HelveticaBold);
+  var pages = doc.getPages(), font = await doc.embedFont(L.StandardFonts.HelveticaBold), notes = [];
   (errors || []).forEach(function(e) {
     if (!e.page || !Array.isArray(e.box) || e.box.length < 4 || e.page > pages.length) return;
     var p = pages[e.page - 1], mb = p.getMediaBox(), w = mb.width, h = mb.height;
@@ -15346,7 +15346,9 @@ async function hwBuildCheckedPdf(fileData, errors) {
     p.drawRectangle(Object.assign(rect(lx, ly, lx + tw, ly + th), { color: col }));
     var o = map(lx + fs * 0.4, ly + th * 0.75);
     p.drawText(tag, { x: o[0], y: o[1], size: fs, font: font, color: L.rgb(1, 1, 1), rotate: L.degrees(r) });
-    // ✍️ the red-pen note beside the ring (right side if there is room, else under it) on a light background
+    // ✍️ the teacher's note WRITTEN ON THE PAGE beside the ring: "E1 — what is wrong here" + "✔ the correct step".
+    // Upright pages: drawn as a small picture (so Bengali, √, ², θ … all show); turned pages: plain letters.
+    if (r === 0 && (e.pen || e.title || e.correct)) { notes.push({ p: p, e: e, cx: cx, cy: cy, rx: rx, ry: ry, VW: VW, VH: VH, slip: slip }); return; }
     var note = pdfSafeText(e.pen || e.title || '');
     if (note) {
       var nfs = Math.max(8, Math.round(VW / 52)), maxW = VW * 0.34, words = note.split(/\s+/), lines = [], cur = '';
@@ -15364,7 +15366,60 @@ async function hwBuildCheckedPdf(fileData, errors) {
       });
     }
   });
+  // the written notes (pictures) beside each ring — placed so they do not cover the ring itself
+  for (var ni = 0; ni < notes.length; ni++) {
+    var N = notes[ni];
+    try {
+      var nc = fbPenNoteCanvas(N.e, N.slip, N.VW * 0.40);
+      if (!nc) continue;
+      var png = await doc.embedPng(Uint8Array.from(atob(nc.toDataURL('image/png').split(',')[1]), function(c) { return c.charCodeAt(0); }));
+      var bw = nc._w, bh = nc._h, mb2 = N.p.getMediaBox();
+      var gapX = N.VW * 0.012;
+      var bx, by;
+      if (N.cx + N.rx + gapX + bw <= N.VW) { bx = N.cx + N.rx + gapX; by = N.cy - bh / 2; }                 // right of the ring
+      else if (N.cx - N.rx - gapX - bw >= 0) { bx = N.cx - N.rx - gapX - bw; by = N.cy - bh / 2; }       // left of it
+      else if (N.cy + N.ry + gapX + bh <= N.VH) { bx = N.cx - bw / 2; by = N.cy + N.ry + gapX; }         // under it
+      else { bx = N.cx - bw / 2; by = N.cy - N.ry - gapX - bh; }                                          // above it
+      bx = Math.max(2, Math.min(bx, N.VW - bw - 2)); by = Math.max(2, Math.min(by, N.VH - bh - 2));
+      N.p.drawImage(png, { x: mb2.x + bx, y: mb2.y + N.VH - by - bh, width: bw, height: bh });
+    } catch (eN) {}
+  }
   return await doc.save({ useObjectStreams: true });
+}
+// ✍️ one note written on the student's page: "E1 · what is wrong" (red) and "✔ correct: …" (green), on a white card
+// width = the space on the page (PDF points); the picture is drawn 3× sharper. Returns the canvas (_w/_h = size on the page)
+function fbPenNoteCanvas(e, slip, width) {
+  var top = texToReadable(e.pen || e.title || ''), ok = texToReadable(e.correct || '');
+  if (top.length > 150) top = top.slice(0, 147) + '…';
+  if (ok.length > 110) ok = ok.slice(0, 107) + '…';
+  if (!top && !ok) return null;
+  var S = 3, fsPt = Math.max(7.5, Math.min(11, width / 22)), fs = fsPt * S, pad = fs * 0.45, W = Math.round(width * S);
+  var FONT = '"Segoe UI", "Noto Sans Bengali", "Nirmala UI", Arial, sans-serif';
+  var c = document.createElement('canvas'), g = c.getContext('2d');
+  var wrap = function(text, font) {
+    g.font = font; var out = [], cur = '';
+    String(text).split(/\s+/).forEach(function(w) { var t2 = cur ? cur + ' ' + w : w; if (g.measureText(t2).width > W - 2 * pad && cur) { out.push(cur); cur = w; } else cur = t2; });
+    if (cur) out.push(cur);
+    return out.slice(0, 4);
+  };
+  var tag = String(e.tag || '!');
+  var f1 = 'bold ' + fs + 'px ' + FONT, f2 = '600 ' + Math.round(fs * 0.92) + 'px ' + FONT;
+  var l1 = top ? wrap(tag + ' · ' + top, f1) : [tag], l2 = ok ? wrap('✔ ' + ok, f2) : [];
+  var lh = fs * 1.28, H = Math.round(pad * 2 + l1.length * lh + l2.length * lh * 0.95);
+  // the card is only as wide as its longest line
+  g.font = f1; var mw = 0; l1.forEach(function(l) { mw = Math.max(mw, g.measureText(l).width); });
+  g.font = f2; l2.forEach(function(l) { mw = Math.max(mw, g.measureText(l).width); });
+  W = Math.min(W, Math.ceil(mw + 2 * pad + 2));
+  c.width = W; c.height = H;
+  var col = slip ? '#c2410c' : '#dc2626';
+  g.fillStyle = 'rgba(255,255,255,0.90)'; g.fillRect(0, 0, W, H);
+  g.strokeStyle = col; g.lineWidth = S * 0.9; g.strokeRect(g.lineWidth / 2, g.lineWidth / 2, W - g.lineWidth, H - g.lineWidth);
+  g.textBaseline = 'top';
+  var y = pad;
+  g.font = f1; g.fillStyle = col; l1.forEach(function(l) { g.fillText(l, pad, y); y += lh; });
+  g.font = f2; g.fillStyle = '#047857'; l2.forEach(function(l) { g.fillText(l, pad, y); y += lh * 0.95; });
+  c._w = W / S; c._h = H / S;
+  return c;
 }
 // 📝 the teacher's comments as A4 pages (drawn as pictures, so Bengali, √, ², θ … all print correctly)
 function fbFeedbackCanvases(t, u, f) {
@@ -15462,7 +15517,7 @@ async function hwStoreCheckedCopy(t, phone, f, sub) {
   var pdf = await hwBuildFullReport(t, phone, f, sub);
   var j = await driveUpload(drive, 'public', ['Checked', t.title || t.id], phone + ' ' + t.id + ' checked', fbBytesToDataUrl(pdf));
   if (!j || !j.id) return false;
-  f.chkId = j.id; f.chkDrive = drive.id; f.chkAt = Date.now(); f.chkOf = Number(sub.uploadedAt || 0); f.chkV = 2;   // v2 = the complete PDF
+  f.chkId = j.id; f.chkDrive = drive.id; f.chkAt = Date.now(); f.chkOf = Number(sub.uploadedAt || 0); f.chkV = CHK_V;   // v2 = the complete PDF, v3 = + the written notes on the pages
   await FBAPI.hwFeedbackSave(f);
   return true;
 }
@@ -15665,8 +15720,66 @@ function openHwFeedbackView(phone) {
   }
 }
 
-// 📄 the feedback as a printable PDF (one page per student) — to show a student offline in class
+// 📄 THE FEEDBACK PDF (teacher): ONE real PDF file per student — cover (name, ID) → question paper → the teacher's
+// comments & hints → ALL the student's handwritten pages, every mistake circled in red with the note written beside it.
+// Several students → all in one PDF, one after another. (The checked copy kept in Drive is used when it is up to date.)
+var CHK_V = 3;
+async function hwReportBytes(t, phone, f, sub) {
+  if (f.chkId && (f.chkV || 1) >= CHK_V && (!sub || Number(f.chkOf || 0) >= Number(sub.uploadedAt || 0))) {
+    try {
+      var dataUrl = await withTimeout(chkCopyData(f), 45000);
+      return Uint8Array.from(atob(dataUrl.split(',')[1]), function(c) { return c.charCodeAt(0); });
+    } catch (e) {}
+  }
+  if (sub && f.status === 'checked') return await withTimeout(hwBuildFullReport(t, phone, f, sub), 180000);
+  // not submitted / no copy: the cover and the comments only
+  var L = await loadPdfLib(), out = await L.PDFDocument.create();
+  var u = DB.get(K.U).find(function(x) { return x.id === phone; }) || { id: phone };
+  var cvs = [coverCanvas(hwCoverInfo(t, u, phone, sub || {}))].concat(f.status === 'missing' ? [] : fbFeedbackCanvases(t, u, f));
+  for (var i = 0; i < cvs.length; i++) {
+    var jp = await out.embedJpg(Uint8Array.from(atob(cvs[i].toDataURL('image/jpeg', 0.86).split(',')[1]), function(c) { return c.charCodeAt(0); }));
+    out.addPage([595, 595 * cvs[i].height / cvs[i].width]).drawImage(jp, { x: 0, y: 0, width: 595, height: 595 * cvs[i].height / cvs[i].width });
+  }
+  return await out.save({ useObjectStreams: true });
+}
+var hwPdfBusy = false;
 async function hwFeedbackPdf(phones) {
+  var d = hwDetail; if (!d) return;
+  var t = d.task;
+  phones = (phones || Object.keys(d.fb)).filter(function(p) { return d.fb[p]; });
+  if (!phones.length) { showToast('No feedback saved yet.', 'error'); return; }
+  if (hwPdfBusy) { showToast('⏳ A PDF is already being made — please wait.', 'error'); return; }
+  hwPdfBusy = true;
+  var byId = {}; DB.get(K.U).forEach(function(u) { byId[u.id] = u; });
+  var name = function(p) { return (byId[p] || {}).fullName || p; };
+  try {
+    var parts = [], failed = [];
+    for (var i = 0; i < phones.length; i++) {
+      var p = phones[i];
+      showToast('📄 Making the PDF' + (phones.length > 1 ? ' — ' + (i + 1) + ' of ' + phones.length : '') + ': ' + esc(name(p)) + ' (all pages of the copy, mistakes marked)…', 'success');
+      try { parts.push(await hwReportBytes(t, p, d.fb[p], d.subs[p])); }
+      catch (e) { failed.push(name(p)); }
+    }
+    if (!parts.length) throw new Error('none');
+    var bytes = parts[0];
+    if (parts.length > 1) {
+      var L = await loadPdfLib(), all = await L.PDFDocument.create();
+      for (var j = 0; j < parts.length; j++) {
+        var src = await L.PDFDocument.load(parts[j], { ignoreEncryption: true });
+        (await all.copyPages(src, src.getPageIndices())).forEach(function(pg) { all.addPage(pg); });
+      }
+      bytes = await all.save({ useObjectStreams: true });
+    }
+    var fname = asciiOnly((phones.length === 1 ? name(phones[0]) + ' - ' : 'All students - ') + (t.title || 'homework')).replace(/[\\\/:*?"<>|]+/g, ' ').trim() + ' - checked.pdf';
+    saveBlobAs(new Blob([bytes], { type: 'application/pdf' }), fname);
+    showToast('✅ PDF ready' + (failed.length ? ' — could not make it for: ' + failed.map(esc).join(', ') + ' (check the internet and try again)' : '') + '.', failed.length ? 'error' : 'success');
+  } catch (e) {
+    showToast('Could not make the PDF — check the internet and try again.', 'error');
+  }
+  hwPdfBusy = false;
+}
+// (older way: an HTML print window — kept only as a spare)
+async function hwFeedbackPdfHtml(phones) {
   var d = hwDetail, t = d.task, k = HW_KINDS[hwKind(t)];
   phones = (phones || Object.keys(d.fb)).filter(function(p) { return d.fb[p]; });
   if (!phones.length) { showToast('No feedback saved yet.', 'error'); return; }

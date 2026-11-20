@@ -536,6 +536,8 @@
     /* the institute logo as a faint background on every student screen (above the cards, so it is always seen) */
     /* the faint logo lies OVER the screen: it must never catch a touch (else the buttons under it, e.g. START EXAM, do nothing) */
     #stu-logo-bg, #stu-logo-bg * { pointer-events: none !important; }
+    /* no faint logo on the exam pages (exam list, rules page, the exam itself) — a clean screen for the exam */
+    body.exam-page #stu-logo-bg { display: none !important; }
     #stu-logo-bg { position: fixed; inset: 0; z-index: 9250; pointer-events: none; display: flex; align-items: center; justify-content: center; }
     #stu-logo-bg img { width: min(70vw, 70vh, 560px); aspect-ratio: 1 / 1; object-fit: contain; border-radius: 50%; clip-path: circle(48% at 50% 50%); opacity: 0.08; filter: grayscale(20%); user-select: none; -webkit-user-drag: none; }
     @media print { #stu-logo-bg { display: none; } }
@@ -3527,7 +3529,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261120185746';
+var APP_BUILD = '20261120190339';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -3922,6 +3924,13 @@ var selectedCheckMonth = '10';
 // --- GEMINI AI API HELPER ---
 
 // --- SCREEN SWITCHER ---
+// the exam pages have no background logo: the exam list (Exams / Exam Alert / Completed), the rules page and the exam
+function examPageMark() {
+  var a = document.querySelector('.view-section.active'), id = a ? a.id : '';
+  var on = id === 'view-consent' || id === 'view-exam' ||
+    (id === 'view-student-dash' && typeof studentTab !== 'undefined' && ['tests', 'examalert', 'completed'].indexOf(studentTab) !== -1);
+  document.body.classList.toggle('exam-page', !!on);
+}
 function showScreen(screenId) {
   DB.init();
   if (examState && !examState.finishing && screenId !== 'view-exam') return;
@@ -3933,6 +3942,7 @@ function showScreen(screenId) {
   }
   var target = document.getElementById(screenId);
   if (target) target.classList.add('active');
+  examPageMark();
   setStudentGuard(cloud.role === 'student' && !!currentUser);
   if (screenId === 'view-student-dash') keepAwake(studentTab === 'hw');
   else if (screenId !== 'view-exam' && screenId !== 'view-result') keepAwake(false);
@@ -7032,6 +7042,7 @@ function renderStudentDashContent(live) {
   // nothing changed on this page: the screen is left as it is (no flicker, no lost tap, no work for the phone)
   if (live === true && full === stuLastHtml && studentTab === stuLastTab) { fillStudentMenu(); updateStudentNav(unread); return; }
   stuLastHtml = full; stuLastTab = studentTab;
+  examPageMark();
   var chatDraft = (document.getElementById('chat-input') || {}).value || '';
   document.getElementById('student-dash-content').innerHTML = full;
   if (studentTab === 'chat') { var ci = document.getElementById('chat-input'); if (ci && chatDraft) ci.value = chatDraft; chatScrollEnd(); chatMarkSeenStudent(); }

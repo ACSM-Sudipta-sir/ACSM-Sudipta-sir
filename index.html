@@ -3495,7 +3495,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261120080633';
+var APP_BUILD = '20261120125302';
 var updateShownFor = '';
 function checkAppUpdate() {
   if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
@@ -5795,6 +5795,7 @@ function openTestQuestions(tid) {
           '<span style="font-size:0.72rem; color:#94a3b8;">📚 ' + esc(chapterOf(q)) + '</span></div>' +
         '<div style="display:flex; gap:5px;">' +
           '<button type="button" class="btn btn-amber btn-xs" onclick="editTestQuestion(\'' + escA(tid) + '\', ' + i + ')" title="Correct the question, options, right answer or solution">✏️ Edit</button>' +
+          '<button type="button" class="btn btn-teal btn-xs" onclick="tqPickOpen(\'' + escA(tid) + '\', ' + i + ')" title="Put another question from the Question Bank in its place">🔄 Replace</button>' +
           '<button type="button" class="btn btn-red btn-xs" onclick="removeTestQuestion(\'' + escA(tid) + '\', ' + i + ')" title="Take this question out of the exam">✕ Remove</button></div>' +
       '</div>' +
       '<div style="margin-top:6px; color:#fff; font-size:0.9rem;">' + mx(testQText(q)) + '</div>' + qImgTag(q) + opts + ans +
@@ -5804,12 +5805,13 @@ function openTestQuestions(tid) {
     '<h3 style="margin:0 0 4px 0;">👁️ Questions — ' + esc(t.title) + '</h3>' +
     '<p style="margin:0 0 10px 0; font-size:0.8rem; color:var(--text-muted);">' + qs.length + ' question(s) in this exam' +
       (per < qs.length ? ' • each student gets <b>' + per + '</b> of them (picked at random)' : '') +
-      ' • the right option is green ✔ — if it is wrong, <b>tap the right option</b> (students are re-marked). Press <b>✕ Remove</b> to take a hard question out.' +
+      ' • the right option is green ✔ — if it is wrong, <b>tap the right option</b> (students are re-marked). Press <b>🔄 Replace</b> to swap a question for another one from the Question Bank, or <b>✕ Remove</b> to take it out.' +
       (qs.some(keyCheck) ? '<br><span style="color:#fbbf24; font-weight:700;">⚠️ ' + qs.filter(keyCheck).length + ' question(s) look like the answer key is wrong — see the yellow boxes.</span>' : '') +
       (n ? '<br><span style="color:#fcd34d;">⚠️ ' + n + ' student(s) already wrote this exam — their papers and marks stay as they are; only the students who start after this get the new set.</span>' : '') + '</p>' +
     '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">' +
       '<button type="button" class="btn btn-teal btn-sm" onclick="testQuestionsPdf(\'' + escA(tid) + '\', false)">📄 Question paper PDF</button>' +
       '<button type="button" class="btn btn-slate btn-sm" onclick="testQuestionsPdf(\'' + escA(tid) + '\', true)">📄 PDF with answers</button>' +
+      '<button type="button" class="btn btn-purple btn-sm" onclick="tqPickOpen(\'' + escA(tid) + '\', -1)">➕ Add from Question Bank</button>' +
     '</div>' +
     '<div style="max-height:62vh; overflow:auto;">' + (rows || '<p style="color:var(--text-muted);">No questions left in this exam.</p>') + '</div>' +
     '<div style="display:flex; justify-content:flex-end; margin-top:10px;"><button type="button" class="btn btn-slate" onclick="closeModal()">Close</button></div>';
@@ -5827,6 +5829,7 @@ function removeTestQuestion(tid, i) {
     '<div style="border:1px solid #334155; border-radius:10px; padding:8px 10px; margin-bottom:12px; color:#fff;">' + mx(testQText(t.questions[i])) + '</div>' +
     '<div style="display:flex; justify-content:flex-end; gap:8px;">' +
       '<button type="button" class="btn btn-slate" onclick="openTestQuestions(\'' + escA(tid) + '\')">◀ Keep it</button>' +
+      '<button type="button" class="btn btn-teal" onclick="tqPickOpen(\'' + escA(tid) + '\', ' + i + ')">🔄 Replace from bank</button>' +
       '<button type="button" class="btn btn-red" onclick="removeTestQuestionGo(\'' + escA(tid) + '\', ' + i + ')">✕ Remove</button></div>';
   renderMath(document.getElementById('row-editor-body'));
 }
@@ -5840,6 +5843,124 @@ function removeTestQuestionGo(tid, i) {
   if (bc && bc.querySelector('[data-tests-page]')) renderAdminTestsContent();   // the "N Qs each" on the card
   openTestQuestions(tid);
   showToast('Question removed. ' + t.questions.length + ' left.', 'success');
+}
+// 🔄 Replace / ➕ Add: pick a question from the Question Bank for an exam that is already set
+// tqPick = { tid, i (-1 = add a new one), cls, ch, d, s, lim }
+var tqPick = null;
+function tqPickOpen(tid, i) {
+  var t = DB.get(K.T).find(function(x) { return x.id === tid; });
+  if (!t) return;
+  var old = i >= 0 && t.questions ? t.questions[i] : null;
+  if (i >= 0 && !old) return;
+  tqPick = { tid: tid, i: i, cls: t.targetBatch || 'ALL', ch: old ? chapterOf(old) : 'ALL', d: 'ALL', s: '', lim: 40 };
+  var qb = DB.get(K.QB);
+  var classes = [];
+  qb.forEach(function(q) { var c = q.partition || 'Class 12'; if (classes.indexOf(c) === -1) classes.push(c); });
+  if (tqPick.cls !== 'ALL' && classes.indexOf(tqPick.cls) === -1) tqPick.cls = 'ALL';
+  var head = old
+    ? '<h3 style="margin:0 0 6px 0;">🔄 Replace Q' + (testQPos[i] || i + 1) + ' — ' + esc(t.title) + '</h3>' +
+      '<div style="border:1px solid #7f1d1d; background:rgba(127,29,29,0.18); border-radius:10px; padding:8px 10px; margin-bottom:8px; font-size:0.84rem; color:#fff; max-height:110px; overflow:auto;"><b style="color:#fca5a5;">Now:</b> ' + mx(testQText(old)) + '</div>' +
+      '<p style="margin:0 0 8px 0; font-size:0.78rem; color:var(--text-muted);">Choose the question to put in its place and press <b>✔ Use this</b>. It gets the same marks (' + Number(old.marks || 0) + ').</p>'
+    : '<h3 style="margin:0 0 6px 0;">➕ Add a question — ' + esc(t.title) + '</h3>' +
+      '<p style="margin:0 0 8px 0; font-size:0.78rem; color:var(--text-muted);">Choose a question and press <b>✔ Use this</b> — it is added to this exam.</p>';
+  document.getElementById('row-editor-body').innerHTML = head +
+    '<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:6px; margin-bottom:6px;">' +
+      '<select id="tqp-cls" class="input" style="margin:0;" onchange="tqPick.cls=this.value; tqPick.ch=\'ALL\'; tqPick.lim=40; tqPickChapters(); tqPickList();">' +
+        '<option value="ALL">All classes</option>' + classes.map(function(c) { return '<option value="' + escA(c) + '"' + (c === tqPick.cls ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select>' +
+      '<select id="tqp-ch" class="input" style="margin:0;" onchange="tqPick.ch=this.value; tqPick.lim=40; tqPickList();"></select>' +
+      '<select id="tqp-d" class="input" style="margin:0;" onchange="tqPick.d=this.value; tqPick.lim=40; tqPickList();">' +
+        ['ALL', 'Easy', 'Medium', 'Hard'].map(function(d) { return '<option value="' + d + '">' + (d === 'ALL' ? 'All levels' : d) + '</option>'; }).join('') + '</select>' +
+    '</div>' +
+    '<input type="text" id="tqp-s" class="input" style="margin:0 0 8px 0;" placeholder="🔍 Search words in the question…" oninput="clearTimeout(tqPickOpen.tm); var v=this.value; tqPickOpen.tm=setTimeout(function(){ tqPick.s=v; tqPick.lim=40; tqPickList(); }, 300);">' +
+    '<div id="tqp-list" style="max-height:52vh; overflow:auto;"></div>' +
+    '<div style="display:flex; justify-content:flex-end; margin-top:10px;"><button type="button" class="btn btn-slate" onclick="openTestQuestions(\'' + escA(tid) + '\')">◀ Back</button></div>';
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+  tqPickChapters();
+  tqPickList();
+}
+function tqPickPool() {
+  var p = tqPick, t = DB.get(K.T).find(function(x) { return x.id === p.tid; });
+  if (!t) return [];
+  var inExam = {};
+  (t.questions || []).forEach(function(q) { inExam[q.id] = 1; });
+  var mcqOnly = t.examFormatMode !== 'Subjective' && t.examFormatMode !== 'AS_IS';
+  return DB.get(K.QB).filter(function(q) {
+    if (mcqOnly && !hasOptions(q)) return false;   // an MCQ exam needs questions with options
+    return !inExam[q.id] && (p.cls === 'ALL' || (q.partition || 'Class 12') === p.cls);
+  });
+}
+function tqPickChapters() {
+  var sel = document.getElementById('tqp-ch');
+  if (!sel || !tqPick) return;
+  var chs = {};
+  tqPickPool().forEach(function(q) { var c = chapterOf(q); chs[c] = (chs[c] || 0) + 1; });
+  var names = Object.keys(chs).sort();
+  if (tqPick.ch !== 'ALL' && !chs[tqPick.ch]) tqPick.ch = 'ALL';
+  sel.innerHTML = '<option value="ALL">All chapters</option>' + names.map(function(c) {
+    return '<option value="' + escA(c) + '"' + (c === tqPick.ch ? ' selected' : '') + '>' + esc(c) + ' (' + chs[c] + ')</option>';
+  }).join('');
+}
+function tqPickList() {
+  var box = document.getElementById('tqp-list');
+  if (!box || !tqPick) return;
+  var p = tqPick, s = normQText(p.s);
+  var list = tqPickPool().filter(function(q) {
+    if (p.ch !== 'ALL' && chapterOf(q) !== p.ch) return false;
+    if (p.d !== 'ALL' && (q.difficulty === 'Easy' || q.difficulty === 'Hard' ? q.difficulty : 'Medium') !== p.d) return false;
+    if (s && normQText(testQText(q)).indexOf(s) === -1) return false;
+    return true;
+  });
+  var shown = list.slice(0, p.lim);
+  box.innerHTML = '<div style="font-size:0.78rem; color:#94a3b8; margin-bottom:6px;">' + list.length + ' question(s) found' + (list.length > shown.length ? ' — showing ' + shown.length : '') + ' (questions already in this exam are not shown)</div>' +
+    (shown.map(function(q) {
+      var d = q.difficulty === 'Easy' || q.difficulty === 'Hard' ? q.difficulty : 'Medium';
+      var opts = hasOptions(q) ? '<div style="margin-top:5px; display:flex; flex-wrap:wrap; gap:5px;">' + q.options.map(function(o, k) {
+        var c = k === Number(q.correct || 0);
+        return '<span style="font-size:0.76rem; padding:2px 7px; border-radius:6px; background:' + (c ? 'rgba(5,150,105,0.28); color:#6ee7b7;' : '#1e293b; color:#cbd5e1;') + '">' + (c ? '✔ ' : '') + String.fromCharCode(65 + k) + ') ' + mx(o) + '</span>';
+      }).join('') + '</div>' : '<div style="margin-top:4px; font-size:0.74rem; color:#c4b5fd;">✍️ Written answer (no options)</div>';
+      return '<div style="border:1px solid #334155; border-radius:10px; padding:9px 11px; margin-bottom:7px; background:#0f172a;">' +
+        '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">' +
+          '<div style="display:flex; gap:5px; flex-wrap:wrap; align-items:center;">' +
+            '<span class="badge ' + (d === 'Easy' ? 'badge-easy' : (d === 'Hard' ? 'badge-hard' : 'badge-medium')) + '">' + d + '</span>' +
+            '<span style="font-size:0.72rem; color:#94a3b8;">📚 ' + esc(chapterOf(q)) + '</span></div>' +
+          '<button type="button" class="btn btn-green btn-xs" style="flex-shrink:0;" onclick="tqPickUse(\'' + escA(q.id) + '\')">✔ Use this</button>' +
+        '</div>' +
+        '<div style="margin-top:5px; color:#fff; font-size:0.88rem;">' + mx(testQText(q)) + '</div>' + qImgTag(q) + opts +
+      '</div>';
+    }).join('') || '<p style="color:var(--text-muted);">No question matches. Try “All chapters”, another level or other words.</p>') +
+    (list.length > shown.length ? '<div style="text-align:center;"><button type="button" class="btn btn-slate btn-sm" onclick="tqPick.lim+=40; tqPickList();">⬇ Show more</button></div>' : '');
+  hydrateQImages(box);
+  renderMath(box);
+}
+function tqPickUse(qid) {
+  var p = tqPick;
+  if (!p) return;
+  var tests = DB.get(K.T), t = tests.find(function(x) { return x.id === p.tid; });
+  var bq = DB.get(K.QB).find(function(x) { return x.id === qid; });
+  if (!t || !bq) return;
+  t.questions = t.questions || [];
+  if (t.questions.some(function(x) { return x.id === qid; })) { showToast('This question is already in the exam.', 'error'); return; }
+  var old = p.i >= 0 ? t.questions[p.i] : null;
+  if (p.i >= 0 && !old) return;
+  var c = JSON.parse(JSON.stringify(bq));
+  var mixed = t.examFormatMode === 'AS_IS';
+  var subj = t.examFormatMode === 'Subjective' || (mixed && (!hasOptions(bq) || (old && old.qType === 'Subjective')));
+  c.qType = subj ? 'Subjective' : 'MCQ';
+  c.difficulty = bq.difficulty === 'Easy' || bq.difficulty === 'Hard' ? bq.difficulty : 'Medium';
+  c.marks = old ? Number(old.marks || 0) : Number(subj && mixed ? (t.subjMarks || 4) : (t.defaultMarksPerQ || 2));
+  if (old) {
+    t.questions[p.i] = c;
+  } else {
+    var all = t.questionsPerStudent >= t.questions.length;   // everyone got every question → they get the new one too
+    t.questions.push(c);
+    if (all) t.questionsPerStudent = t.questions.length;
+  }
+  DB.set(K.T, tests);
+  var bc = document.getElementById('admin-body-content');
+  if (bc && bc.querySelector('[data-tests-page]')) renderAdminTestsContent();
+  var n = p.i;
+  openTestQuestions(p.tid);
+  showToast(old ? '✔ Q' + (testQPos[n] || n + 1) + ' replaced.' : '✔ Question added — ' + t.questions.length + ' in the exam now.', 'success');
 }
 // a printable question paper (Save as PDF) — e.g. for a student who missed the exam
 async function testQuestionsPdf(tid, withAns) {

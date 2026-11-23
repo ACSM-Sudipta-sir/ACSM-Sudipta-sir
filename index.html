@@ -538,6 +538,8 @@
     #stu-logo-bg, #stu-logo-bg * { pointer-events: none !important; }
     /* no faint logo on the exam pages (exam list, rules page, the exam itself) — a clean screen for the exam */
     body.exam-page #stu-logo-bg { display: none !important; }
+    /* a class video is playing: no logo over the picture */
+    body.video-on #stu-logo-bg { display: none !important; }
     #stu-logo-bg { position: fixed; inset: 0; z-index: 9250; pointer-events: none; display: flex; align-items: center; justify-content: center; }
     #stu-logo-bg img { width: min(70vw, 70vh, 560px); aspect-ratio: 1 / 1; object-fit: contain; border-radius: 50%; clip-path: circle(48% at 50% 50%); opacity: 0.08; filter: grayscale(20%); user-select: none; -webkit-user-drag: none; }
     @media print { #stu-logo-bg { display: none; } }
@@ -3529,7 +3531,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261122205047';
+var APP_BUILD = '20261124002430';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -3924,10 +3926,11 @@ var selectedCheckMonth = '10';
 // --- GEMINI AI API HELPER ---
 
 // --- SCREEN SWITCHER ---
-// the exam pages have no background logo: the exam list (Exams / Exam Alert / Completed), the rules page and the exam
+// no background logo on the pages with the START buttons: the exam list (Exams / Exam Alert / Completed) and the
+// rules page. During the exam itself only the logo is shown (no name / number) — the teacher's wish.
 function examPageMark() {
   var a = document.querySelector('.view-section.active'), id = a ? a.id : '';
-  var on = id === 'view-consent' || id === 'view-exam' ||
+  var on = id === 'view-consent' ||
     (id === 'view-student-dash' && typeof studentTab !== 'undefined' && ['tests', 'examalert', 'completed'].indexOf(studentTab) !== -1);
   document.body.classList.toggle('exam-page', !!on);
 }
@@ -13948,6 +13951,7 @@ function vpApi() {
 }
 function vpFmt(s) { s = Math.max(0, Math.floor(s || 0)); var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (x < 10 ? '0' : '') + x; }
 function vpStop() {
+  document.body.classList.remove('video-on');   // the background logo comes back
   if (vp.timer) { clearInterval(vp.timer); vp.timer = null; }
   if (vp.player) { try { vp.player.destroy(); } catch (e) {} vp.player = null; }
   var box = document.getElementById('vp-box');
@@ -14007,6 +14011,7 @@ function openVideo(id) {
   var v = videoList().find(function(x) { return x.id === id; });
   if (!v) return;
   vpStop();
+  document.body.classList.add('video-on');   // no background logo over the video (back when the video is closed)
   var btn = 'background:rgba(255,255,255,0.14); color:#fff; border:0; border-radius:8px; padding:6px 10px; font-size:0.95rem; cursor:pointer; touch-action:manipulation;';
   document.getElementById('row-editor-body').innerHTML =
     '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px;"><h3 style="margin:0; font-size:1rem;">📹 ' + esc(v.title) + '</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
@@ -16895,7 +16900,9 @@ function showWarningOverlay(n, detail) {
 }
 
 // faint name + number of the student across the exam screen (shows who took a screenshot / photo)
+var EXAM_NAME_WM = false;   // the teacher asked: no name / number across the screen — only the logo
 function showExamWatermark() {
+  if (!EXAM_NAME_WM) return;
   if (document.getElementById('exam-wm') || !currentUser) return;
   var label = (currentUser.fullName || '') + ' • ' + (currentUser.id || '') + ' • ACSM';
   var wm = document.createElement('div');
@@ -17528,7 +17535,7 @@ function renderSubmissionResultScreen(sub) {
     var label = ev.pending ? '⏳ Waiting for teacher’s review' : (ev.isCorrect ? '✓ Correct' : '✕ Incorrect');
     var badgeCss = ev.pending ? 'rgba(245,158,11,0.2); color:#fcd34d;' : (ev.isCorrect ? 'rgba(5,150,105,0.25); color:#6ee7b7;' : 'rgba(220,38,38,0.25); color:#fca5a5;');
     return '<div style="position:relative; background:#090d16; border:1px solid #1e293b; border-left:4px solid ' + col + '; border-radius:12px; padding:14px; margin-bottom:12px;">' +
-      (guard ? '<div aria-hidden="true" style="position:absolute; inset:0; z-index:3; pointer-events:none; border-radius:12px; ' + wmCss + '"></div>' : '') +
+      '' +   // (the student's name / number written over the answers was removed — the teacher asked for only the logo)
       '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;">' +
         '<span style="font-weight:800; color:#fcd34d;">Question ' + ev.qNo + ' (' + esc(ev.format || 'MCQ') + ')' + (ev.difficulty ? ' ' + diffBadge(ev.difficulty) : '') + '</span>' +
         '<span class="badge" style="background:' + badgeCss + '">' + label + (ev.pending ? '' : ' (' + ev.awarded + ' / ' + ev.marks + ')') + '</span>' +

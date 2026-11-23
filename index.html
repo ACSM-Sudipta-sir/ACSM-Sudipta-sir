@@ -3531,7 +3531,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261124002430';
+var APP_BUILD = '20261124003729';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -3933,6 +3933,21 @@ function examPageMark() {
   var on = id === 'view-consent' ||
     (id === 'view-student-dash' && typeof studentTab !== 'undefined' && ['tests', 'examalert', 'completed'].indexOf(studentTab) !== -1);
   document.body.classList.toggle('exam-page', !!on);
+  stuNameTag(cloud.role === 'student' && !!currentUser && (id === 'view-exam' || id === 'view-result'));
+}
+// 👤 the student's name, small in the bottom-left corner of the exam and the answers page
+// (a photo of the screen then shows whose it is — not across the whole screen, only in the corner)
+function stuNameTag(on) {
+  var el = document.getElementById('stu-name-tag');
+  if (!on) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'stu-name-tag';
+    el.setAttribute('aria-hidden', 'true');
+    el.style.cssText = 'position:fixed; left:calc(8px + env(safe-area-inset-left, 0px)); bottom:calc(8px + env(safe-area-inset-bottom, 0px)); z-index:9450; pointer-events:none; max-width:60vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:3px 10px; border-radius:999px; background:rgba(15,23,42,0.72); border:1px solid rgba(148,163,184,0.45); color:#e2e8f0; font:700 12px/1.3 system-ui, "Noto Sans Bengali", sans-serif; -webkit-user-select:none; user-select:none;';
+    document.body.appendChild(el);
+  }
+  el.textContent = '👤 ' + (currentUser.fullName || '');
 }
 function showScreen(screenId) {
   DB.init();

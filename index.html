@@ -3531,7 +3531,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261124003729';
+var APP_BUILD = '20261124005456';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -15605,6 +15605,12 @@ function fbBytesToDataUrl(bytes) {
 // maths / LaTeX → readable plain text (√, ², θ …) for drawing on a canvas
 function texToReadable(s) {
   var t = plainText(String(s || ''));
+  // matrices: \begin{bmatrix}1&3\\3&4\end{bmatrix} → [1 3; 3 4]  (was shown as "bmatrix1&3\\3&4bmatrix")
+  t = t.replace(/\\begin\{([pbvBV]?matrix|array)\}(\{[^{}]*\})?([\s\S]*?)\\end\{\1\}/g, function(m, env, cols, body) {
+    var rows = body.split(/\\\\/).map(function(r) { return r.split('&').map(function(x) { return x.trim(); }).join('  '); }).filter(function(r) { return r.trim(); });
+    var o = env === 'pmatrix' ? '(' : (/vmatrix/i.test(env) ? '|' : '['), c = env === 'pmatrix' ? ')' : (/vmatrix/i.test(env) ? '|' : ']');
+    return o + rows.join(' ; ') + c;
+  });
   t = t.replace(/\\\(|\\\)|\\\[|\\\]|\$\$?/g, '').replace(/\\left|\\right|\\displaystyle|\\,|\\;|\\!|\\quad/g, ' ');
   var wrap = function(x) { x = String(x).trim(); return /^[A-Za-z0-9√.°]+$/.test(x) ? x : '(' + x + ')'; };
   for (var g = 0; g < 4; g++) t = t.replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, function(m, a, b) { return wrap(a) + '/' + wrap(b); }).replace(/\\sqrt\{([^{}]*)\}/g, function(m, a) { return '√' + wrap(a); });
@@ -15769,6 +15775,47 @@ function fbPenNoteCanvas(e, slip, width) {
   return c;
 }
 // 📝 the teacher's comments as A4 pages (drawn as pictures, so Bengali, √, ², θ … all print correctly)
+// ---- ∑ the maths in the feedback PDF, drawn by KaTeX (like on the screen) ----
+var fbMathCollect = null, fbMathImgs = {};
+function fbHasTex(s) { return /\\[a-zA-Z]+|[A-Za-z0-9)\]}]\s*[\^_]|\\\(|\\\[|\$/.test(String(s || '')); }
+function fbMathKey(text, size, color, weight, maxW) { return [size, color, weight, Math.round(maxW), text].join('|'); }
+// pass 1 notes every paragraph with maths; each one is drawn by KaTeX into a picture (html2canvas); pass 2 (the real
+// fbFeedbackCanvases) puts the pictures on the pages. Anything that fails simply stays as plain text.
+async function fbPrepMath(t, u, f) {
+  if (!window.katex || !f) return;
+  fbMathCollect = [];
+  try { fbFeedbackCanvases(t, u, f); } catch (e) {}
+  var list = fbMathCollect; fbMathCollect = null;
+  list = list.filter(function(r) { return !fbMathImgs[r.key]; });
+  if (!list.length) return;
+  if (Object.keys(fbMathImgs).length > 600) fbMathImgs = {};
+  var h2c;
+  try { h2c = await withTimeout(loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', 'html2canvas'), 20000); } catch (e) { return; }
+  if (typeof h2c !== 'function') h2c = window.html2canvas;
+  if (typeof h2c !== 'function') return;
+  var FONT = '"Segoe UI", "Noto Sans Bengali", "Nirmala UI", Arial, sans-serif';
+  var host = document.createElement('div');
+  host.style.cssText = 'position:fixed; left:-14000px; top:0; background:#fff; pointer-events:none;';
+  document.body.appendChild(host);
+  try {
+    for (var i = 0; i < list.length; i++) {
+      var r = list[i];
+      if (fbMathImgs[r.key]) continue;
+      var d = document.createElement('div');
+      d.style.cssText = 'width:' + Math.round(r.maxW) + 'px; font-family:' + FONT + '; font-size:' + r.size + 'px; font-weight:' + r.weight + '; line-height:1.5; color:' + r.color + '; background:#fff; padding:2px 0; overflow-wrap:break-word;';
+      d.innerHTML = mxa(r.text).replace(/\n/g, '<br>');
+      host.innerHTML = ''; host.appendChild(d);
+      renderMath(d);
+      if (!d.querySelector('.katex')) continue;                     // no maths after all: plain text is fine
+      if (d.scrollWidth > r.maxW + 2) d.style.width = d.scrollWidth + 'px';   // a long formula: drawn whole, shrunk on the page
+      try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) {}
+      try {
+        var cv = await withTimeout(h2c(d, { backgroundColor: '#ffffff', scale: 1, logging: false, useCORS: true }), 15000);
+        if (cv && cv.width && cv.height) fbMathImgs[r.key] = cv;
+      } catch (e) {}
+    }
+  } finally { host.remove(); }
+}
 function fbFeedbackCanvases(t, u, f) {
   var W = 1240, H = 1754, M = 80, pages = [], c = null, g = null, y = 0;
   var FONT = '"Segoe UI", "Noto Sans Bengali", "Nirmala UI", Arial, sans-serif';
@@ -15783,6 +15830,18 @@ function fbFeedbackCanvases(t, u, f) {
   var need = function(h) { if (!c || y + h > H - 70) newPage(); };
   // one paragraph, wrapped; returns nothing — moves y
   var para = function(text, size, color, weight, indent) {
+    // ∑ a paragraph with maths: drawn by KaTeX (made beforehand by fbPrepMath) — fractions, powers, √, matrices
+    // look exactly as on the screen. Without the picture: the plain-text way below.
+    var raw = String(text || ''), mw0 = W - 2 * M - (indent || 0);
+    if (fbHasTex(raw)) {
+      var key = fbMathKey(raw, size, color || '#111827', weight || '400', mw0);
+      if (fbMathCollect) fbMathCollect.push({ key: key, text: raw, size: size, color: color || '#111827', weight: weight || '400', maxW: mw0 });
+      else if (fbMathImgs[key] && fbMathImgs[key].height * Math.min(1, mw0 / fbMathImgs[key].width) < H - 200) {
+        var im = fbMathImgs[key], sc = Math.min(1, mw0 / im.width), hh = im.height * sc;
+        need(hh + 4); g.drawImage(im, M + (indent || 0), y, im.width * sc, hh); y += hh + 4;
+        return;
+      }
+    }
     text = texToReadable(text); if (!text) return;
     indent = indent || 0;
     g.font = (weight || '400') + ' ' + size + 'px ' + FONT;
@@ -15853,6 +15912,7 @@ async function hwBuildFullReport(t, phone, f, sub) {
   await addImg(coverCanvas(hwCoverInfo(t, u, phone, sub)));
   var q = await hwQuestionPdf(t);
   if (q) { try { await addPdf(bytesOf(q)); } catch (e) {} }
+  try { await fbPrepMath(t, u, f); } catch (e) {}
   var fbPages = fbFeedbackCanvases(t, u, f);
   for (var i = 0; i < fbPages.length; i++) await addImg(fbPages[i]);
   await addPdf(await hwBuildCheckedPdf(await hwGetSubData(sub), f.errors, f.qtable));
@@ -16071,7 +16131,7 @@ function openHwFeedbackView(phone) {
 // 📄 THE FEEDBACK PDF (teacher): ONE real PDF file per student — cover (name, ID) → question paper → the teacher's
 // comments & hints → ALL the student's handwritten pages, every mistake circled in red with the note written beside it.
 // Several students → all in one PDF, one after another. (The checked copy kept in Drive is used when it is up to date.)
-var CHK_V = 4;   // v4: correct questions show ✔ (not ✘) in the table, ✔ ticks and slip boxes on the pages
+var CHK_V = 5;   // v5: the maths in the feedback pages drawn by KaTeX (matrices, fractions …)   // v4: correct questions show ✔ (not ✘) in the table, ✔ ticks and slip boxes on the pages
 async function hwReportBytes(t, phone, f, sub) {
   if (f.chkId && (f.chkV || 1) >= CHK_V && (!sub || Number(f.chkOf || 0) >= Number(sub.uploadedAt || 0))) {
     try {
@@ -16083,6 +16143,7 @@ async function hwReportBytes(t, phone, f, sub) {
   // not submitted / no copy: the cover and the comments only
   var L = await loadPdfLib(), out = await L.PDFDocument.create();
   var u = DB.get(K.U).find(function(x) { return x.id === phone; }) || { id: phone };
+  if (f.status !== 'missing') { try { await fbPrepMath(t, u, f); } catch (e) {} }
   var cvs = [coverCanvas(hwCoverInfo(t, u, phone, sub || {}))].concat(f.status === 'missing' ? [] : fbFeedbackCanvases(t, u, f));
   for (var i = 0; i < cvs.length; i++) {
     var jp = await out.embedJpg(Uint8Array.from(atob(cvs[i].toDataURL('image/jpeg', 0.86).split(',')[1]), function(c) { return c.charCodeAt(0); }));

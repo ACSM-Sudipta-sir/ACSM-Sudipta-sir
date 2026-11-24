@@ -3532,7 +3532,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261124180615';
+var APP_BUILD = '20261124185442';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -6560,6 +6560,38 @@ var SD_ITEMS = [
 var myLogin = null, myLoginSeenN = -1;
 var DEVICE_EXPIRE_DAYS = 90;
 function devicesOf(lg) { return window.FBAPI && FBAPI.loginDevicesOf ? FBAPI.loginDevicesOf(lg) : []; }
+// 📱 a phone's model code → a name a person knows ("SM-A145F" → "Samsung Galaxy A14 (SM-A145F)")
+function phoneName(model) {
+  var m = String(model || '').trim(), u = m.toUpperCase(), r;
+  if (!m || u === 'K') return '';
+  // A / M series as written; the Galaxy F series has SM-E codes (SM-E236B = F23); SM-F… are the Z Fold / Flip
+  if ((r = u.match(/^SM-([AME])(\d)(\d)\d/))) return 'Samsung Galaxy ' + (r[1] === 'E' ? 'F' : r[1]) + (r[2] === '0' ? '' : r[2]) + r[3] + ' (' + m + ')';
+  if (/^SM-F[79]\d\d/.test(u)) return 'Samsung Galaxy Z ' + (/^SM-F9/.test(u) ? 'Fold' : 'Flip') + ' (' + m + ')';
+  if ((r = u.match(/^SM-S9(\d)(\d)/))) {
+    var gen = { '0': 'S22', '1': 'S23', '2': 'S24', '3': 'S25', '4': 'S26' }[r[1]], v = { '1': '', '6': '+', '8': ' Ultra' }[r[2]];
+    if (gen) return 'Samsung Galaxy ' + gen + (v || '') + ' (' + m + ')';
+  }
+  if (/^SM-[TXP]/.test(u)) return 'Samsung Galaxy Tab (' + m + ')';
+  if (/^SM-/.test(u)) return 'Samsung Galaxy (' + m + ')';
+  if (/^RMX/.test(u)) return 'Realme (' + m + ')';
+  if (/^CPH/.test(u)) return 'OPPO / OnePlus (' + m + ')';
+  if (/^(IN|LE|KB|NE|PHB|PJ[A-Z]|AC)\d{4}/.test(u)) return 'OnePlus (' + m + ')';
+  if (/^V2\d{3}/.test(u)) return 'vivo (' + m + ')';
+  if (/^I2\d{3}/.test(u)) return 'iQOO (' + m + ')';
+  if (/^(M\d{4}[A-Z0-9]+|\d{5,}[A-Z][A-Z0-9]{0,6})$/.test(u)) return 'Xiaomi / Redmi / POCO (' + m + ')';
+  if (/^TA-\d/.test(u)) return 'Nokia (' + m + ')';
+  if (/^(XT|MOTO)/.test(u)) return 'Motorola (' + m + ')';
+  if (/^(X6|X66|X67|X68)\d/.test(u)) return 'Infinix (' + m + ')';
+  if (/^(KE|KG|KI|CK|CL|BG|BF|LH|LI)\d/.test(u)) return 'TECNO (' + m + ')';
+  return m;   // already a name ("Redmi Note 12", "moto g54 5G", "Pixel 7", "Nothing Phone (2a)" …)
+}
+// a stored label → readable: older labels kept the bare code ("Android (SM-A145F) · Chrome") or only "K"
+function niceDevLabel(label) {
+  var s = String(label || '');
+  if (!s) return 'Unknown device';
+  if (/ — /.test(s)) return s;                                  // already the new readable form
+  return s.replace(/^Android \(([^)]+)\)/, function(x, md) { var n = phoneName(md); return n ? 'Android — ' + n : 'Android (model not known yet — shows after the next login)'; });
+}
 function deviceLimitOf(lg) { return Number(lg && lg.maxDevices) || (window.FBAPI && FBAPI.DEFAULT_DEVICES) || 2; }
 window.onMyLogin = function(lg) {
   var devs = devicesOf(lg);
@@ -6582,7 +6614,7 @@ function openDeviceCodeBox() {
   o.style.cssText = 'position:fixed; inset:0; z-index:9400; background:rgba(2,6,23,0.88); display:flex; align-items:center; justify-content:center; padding:18px;';
   o.innerHTML = '<div class="card card-amber" style="max-width:380px; width:100%; margin:0;">' +
     '<h3 style="margin:0 0 6px 0;">📱 Add a new device?</h3>' +
-    '<p style="margin:0 0 8px 0; font-size:0.86rem;"><b>' + esc(p.label || 'A device') + '</b> wants to use your account' + (p.at ? ' (' + fmtWhen(p.at) + ')' : '') + '.</p>' +
+    '<p style="margin:0 0 8px 0; font-size:0.86rem;"><b>' + esc(niceDevLabel(p.label)) + '</b> wants to use your account' + (p.at ? ' (' + fmtWhen(p.at) + ')' : '') + '.</p>' +
     '<p style="margin:0 0 6px 0; font-size:0.82rem; color:var(--text-muted);">If it is yours, type the 6-digit code shown on that device:</p>' +
     '<input type="tel" id="dev-code" class="input" maxlength="6" inputmode="numeric" placeholder="6-digit code" style="letter-spacing:5px; font-weight:800; text-align:center;">' +
     '<div style="display:flex; gap:8px;"><button type="button" class="btn btn-slate" style="flex:1;" onclick="rejectMyDevice()">✕ Not me</button>' +
@@ -6604,14 +6636,14 @@ function studentDevicesHtml(u) {
   if (p && p.code) {
     pend = '<div class="card card-amber">' +
       '<b style="color:#fcd34d;">➕ A new device wants to join</b>' +
-      '<div style="font-size:0.84rem; margin:4px 0 8px 0;">' + esc(p.label || 'Unknown device') + ' • ' + fmtWhen(p.at) + (p.ip ? ' • IP ' + esc(p.ip) : '') + '</div>' +
+      '<div style="font-size:0.84rem; margin:4px 0 8px 0;">' + esc(niceDevLabel(p.label)) + ' • ' + fmtWhen(p.at) + (p.ip ? ' • IP ' + esc(p.ip) : '') + '</div>' +
       '<p style="font-size:0.82rem; color:var(--text-muted); margin:0 0 6px 0;">Is it yours? Type the 6-digit code shown on that device\'s login screen:</p>' +
       '<div style="display:flex; gap:8px;"><input type="tel" id="dev-code" class="input" maxlength="6" inputmode="numeric" placeholder="6-digit code" style="margin:0; letter-spacing:4px; font-weight:800; text-align:center; max-width:170px;">' +
         '<button type="button" class="btn btn-green" onclick="addMyDevice()">➕ Add device</button></div>' +
       '<button type="button" class="btn btn-slate btn-sm" style="margin-top:8px;" onclick="rejectMyDevice()">✕ That is not me</button>' +
     '</div>';
   } else if (p) {
-    pend = '<div class="card card-amber"><b style="color:#fcd34d;">🔒 ' + esc(p.label || 'A device') + ' tried to log in</b><div style="font-size:0.82rem; color:var(--text-muted); margin-top:4px;">All ' + max + ' device places are used, so only your teacher can allow it (or remove one of the devices below).</div>' +
+    pend = '<div class="card card-amber"><b style="color:#fcd34d;">🔒 ' + esc(niceDevLabel(p.label)) + ' tried to log in</b><div style="font-size:0.82rem; color:var(--text-muted); margin-top:4px;">All ' + max + ' device places are used, so only your teacher can allow it (or remove one of the devices below).</div>' +
       '<button type="button" class="btn btn-slate btn-sm" style="margin-top:8px;" onclick="rejectMyDevice()">✕ That is not me</button></div>';
   }
   return '<div class="page-title">📱 My Devices</div>' +
@@ -7739,7 +7771,7 @@ window.onLoginsData = function(list) {
   var fresh = deviceReqs.filter(function(l) { var k = l.phone + '_' + l.pendingDevice.at; var n = !deviceSeen[k]; deviceSeen[k] = 1; return n; });
   if (fresh.length) {
     if (first) showToast('📱 ' + fresh.length + ' student(s) are waiting for permission to use a new device.', 'error');
-    else fresh.forEach(function(l) { showToast('📱 ' + ((byId[l.phone] || {}).fullName || l.phone) + ' wants to log in on a new device (' + (l.pendingDevice.label || 'unknown') + ').', 'error'); });
+    else fresh.forEach(function(l) { showToast('📱 ' + ((byId[l.phone] || {}).fullName || l.phone) + ' wants to log in on a new device (' + niceDevLabel(l.pendingDevice.label) + ').', 'error'); });
   }
   updateDeviceAlert();
   expireOldDevices(list);
@@ -7811,7 +7843,7 @@ function renderDeviceRequests() {
     var u = byId[l.phone] || {}, p = l.pendingDevice, devs = devicesOf(l), max = deviceLimitOf(l);
     return '<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:8px 0; border-bottom:1px solid #1e293b;">' +
       '<div style="flex:1; min-width:220px; font-size:0.84rem;"><b style="font-size:0.95rem;">' + esc(u.fullName || l.phone) + '</b> <span style="color:var(--text-muted);">' + esc(l.phone) + '</span><br>' +
-        '🆕 Wants: <b>' + esc(p.label || 'Unknown device') + '</b>' + (p.ip ? ' <span style="color:var(--text-muted);">(IP ' + esc(p.ip) + ')</span>' : '') + ' • ' + fmtWhen(p.at) +
+        '🆕 Wants: <b>' + esc(niceDevLabel(p.label)) + '</b>' + (p.ip ? ' <span style="color:var(--text-muted);">(IP ' + esc(p.ip) + ')</span>' : '') + ' • ' + fmtWhen(p.at) +
         (p.code ? ' <span style="color:#86efac;">(the student can add it with the code ' + esc(p.code) + ' from their other device)</span>' : ' <span style="color:#fcd34d;">(all ' + max + ' places used)</span>') + '<br>' +
         '<span style="color:var(--text-muted);">Now allowed (' + devs.length + '/' + max + '): ' + (devs.map(function(d) { return esc(d.label || 'device'); }).join(', ') || '—') + (l.lastIp ? ' • last IP ' + esc(l.lastIp) : '') + '</span></div>' +
       '<button type="button" class="btn btn-green btn-sm" onclick="approveDevice(\'' + escA(l.phone) + '\', this)">✅ Allow' + (devs.length >= max ? ' (replaces the oldest)' : '') + '</button>' +
@@ -7866,7 +7898,8 @@ function renderAdminDevicesContent() {
       : (devs.length ? '<span class="badge badge-easy">🔒 ' + devs.length + ' / ' + max + '</span>' : '<span class="badge" style="background:#334155;">not used yet</span>');
     return '<tr>' + stuIdentCell(u) +
       '<td>' + esc(u.studentClass || u.batch || '') + '</td>' +
-      '<td style="font-size:0.82rem;">' + (devs.map(function(d) { return (/Windows|Mac|Linux/i.test(d.label || '') ? '💻 ' : '📱 ') + esc(d.label || 'device') + '<span style="color:var(--text-muted);"> — ' + (seen[d.id] ? 'used ' + fmtWhen(seen[d.id]) : (d.boundAt ? 'since ' + fmtWhen(d.boundAt) : '')) + '</span>'; }).join('<br>') || '—') + '</td>' +
+      '<td style="font-size:0.82rem;">' + (devs.map(function(d, i) { return '<b>' + (i + 1) + '.</b> ' + (/Windows|Mac|Linux/i.test(d.label || '') ? '💻 ' : '📱 ') + '<b>' + esc(niceDevLabel(d.label)) + '</b><span style="color:var(--text-muted);"> — ' + (seen[d.id] ? 'used ' + fmtWhen(seen[d.id]) : (d.boundAt ? 'since ' + fmtWhen(d.boundAt) : '')) + '</span>'; }).join('<br>') || '—') +
+        (function() { var tr = (l.tries || []).filter(function(x) { return Date.now() - Number(x.at || 0) < 30 * 86400000; }); return tr.length ? '<div style="margin-top:4px; color:#fca5a5; font-weight:700;">🚫 ' + tr.length + ' try(s) from other phones in 30 days — last: ' + esc(niceDevLabel(tr[tr.length - 1].label)) + ', ' + fmtWhen(tr[tr.length - 1].at) + '</div>' : ''; })() + '</td>' +
       '<td style="font-size:0.82rem;">' + (l.lastLoginAt ? fmtWhen(l.lastLoginAt) : '—') + (l.lastIp ? '<br><span style="color:var(--text-muted);">IP ' + esc(l.lastIp) + '</span>' : '') + '</td>' +
       '<td>' + st + '</td>' +
       '<td><button type="button" class="btn btn-slate btn-xs" onclick="openStudentLoginModal(\'' + escA(u.id) + '\')">🔐 Manage</button></td></tr>';
@@ -7906,12 +7939,14 @@ async function openStudentLoginModal(stuId) {
   } else {
     info = '<p style="margin:0 0 4px 0;"><b>Allowed devices (' + devs.length + ' / ' + max + '):</b></p>' +
       devs.map(function(d) {
-        return '<div style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid #1e293b; font-size:0.84rem;"><span style="flex:1;">' + (/Windows|Mac|Linux/i.test(d.label || '') ? '💻 ' : '📱 ') + esc(d.label || 'Unknown device') +
+        return '<div style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid #1e293b; font-size:0.84rem;"><span style="flex:1;">' + (/Windows|Mac|Linux/i.test(d.label || '') ? '💻 ' : '📱 ') + '<b>' + esc(niceDevLabel(d.label)) + '</b>' + (d.relinkedAt ? ' <span style="color:#6ee7b7; font-size:0.74rem;">♻️ recognised again ' + fmtWhen(d.relinkedAt) + '</span>' : '') +
           '<br><span style="color:var(--text-muted);">added ' + fmtWhen(d.boundAt) + (seen[d.id] ? ' • last used ' + fmtWhen(seen[d.id]) : '') + (d.ip ? ' • IP ' + esc(d.ip) : '') + '</span></span>' +
           '<button type="button" class="btn btn-red btn-xs" onclick="removeStudentDevice(\'' + escA(stuId) + '\', \'' + escA(d.id) + '\')">✕ Remove</button></div>';
       }).join('') +
       '<p style="margin:6px 0 4px 0;"><b>Last login:</b> ' + fmtWhen(l.lastLoginAt) + (l.lastIp ? ' from IP ' + esc(l.lastIp) : '') + '</p>' +
-      (l.pendingDevice && l.pendingDevice.id ? '<p style="margin:6px 0 4px 0; color:#fcd34d;">🆕 Waiting: ' + esc(l.pendingDevice.label || '') + (l.pendingDevice.ip ? ' (IP ' + esc(l.pendingDevice.ip) + ')' : '') + ' • ' + fmtWhen(l.pendingDevice.at) + (l.pendingDevice.code ? ' • code ' + esc(l.pendingDevice.code) : '') + '</p>' +
+      ((l.tries || []).length ? '<div style="margin:8px 0; padding:8px 10px; border-radius:8px; background:rgba(220,38,38,0.10); border:1px solid #7f1d1d; font-size:0.8rem;"><b style="color:#fca5a5;">🚫 Tries from phones that are NOT allowed (latest first):</b>' +
+        l.tries.slice().reverse().map(function(x) { return '<div style="margin-top:3px;">📱 ' + esc(niceDevLabel(x.label)) + ' <span style="color:var(--text-muted);">— ' + fmtWhen(x.at) + (x.ip ? ' • IP ' + esc(x.ip) : '') + '</span></div>'; }).join('') + '</div>' : '') +
+      (l.pendingDevice && l.pendingDevice.id ? '<p style="margin:6px 0 4px 0; color:#fcd34d;">🆕 Waiting: ' + esc(niceDevLabel(l.pendingDevice.label)) + (l.pendingDevice.ip ? ' (IP ' + esc(l.pendingDevice.ip) + ')' : '') + ' • ' + fmtWhen(l.pendingDevice.at) + (l.pendingDevice.code ? ' • code ' + esc(l.pendingDevice.code) : '') + '</p>' +
         '<button type="button" class="btn btn-green btn-block" onclick="approveDevice(\'' + escA(stuId) + '\', this).then(function(){ openStudentLoginModal(\'' + escA(stuId) + '\'); })">✅ Allow this new device' + (devs.length >= max ? ' (replaces the oldest)' : '') + '</button>' : '') +
       limitSel +
       '<button type="button" class="btn btn-amber btn-block" style="margin-top:10px;" onclick="unlockStudentDevice(\'' + escA(stuId) + '\')">📱 Remove ALL devices (the next device the student uses is added)</button>';
@@ -19082,6 +19117,40 @@ function deviceId() {
   if (ck !== id) devCookieSet(id);
   return id;
 }
+// 📱 the phone's real model. New Chrome hides it in the user-agent ("Android 10; K"); it is asked from
+// the browser's client hints (e.g. "SM-A145F", "23021RAAEG") and kept on the phone.
+let devModelP = null;
+function deviceModel() {
+  if (devModelP) return devModelP;
+  devModelP = (async function () {
+    let m = lsGet("acsm_dev_model");
+    try {
+      const ud = navigator.userAgentData;
+      if (ud && ud.getHighEntropyValues) {
+        const v = await Promise.race([ud.getHighEntropyValues(["model"]), new Promise(function (r) { setTimeout(function () { r(null); }, 1500); })]);
+        if (v && v.model) { m = v.model; lsSet("acsm_dev_model", m); }
+      }
+    } catch (e) {}
+    if (!m) m = (String(navigator.userAgent || "").match(/Android [^;]*;\s*([^;)]+?)(?:\sBuild|\))/) || [])[1] || "";
+    m = String(m || "").trim();
+    return m && m !== "K" ? m : "";
+  })();
+  return devModelP;
+}
+// the name the teacher sees: "Android — Samsung Galaxy A14 (SM-A145F) · Chrome", "iPhone/iPad (390×844) · Safari", "Windows · Edge"
+async function deviceLabelNice() {
+  const ua = navigator.userAgent || "", base = deviceLabel(), br = base.split(" · ")[1] || "Browser";
+  if (/Android/i.test(ua)) {
+    const md = await deviceModel();
+    const nm = md ? (window.phoneName ? window.phoneName(md) : md) : "";
+    return nm ? "Android — " + nm + " · " + br : base;
+  }
+  if (/iPhone|iPad|iPod/i.test(ua)) {
+    const s = window.screen || {};
+    return (/iPad/i.test(ua) ? "iPad" : "iPhone") + " (screen " + Math.min(s.width || 0, s.height || 0) + "×" + Math.max(s.width || 0, s.height || 0) + ") · " + br;
+  }
+  return base;
+}
 // 🔎 the same phone + browser, even when its saved id was erased: model, browser, screen, cores, memory, time zone,
 // language. Used ONLY to recognise a device that was already allowed (the password is still needed).
 function deviceFp() {
@@ -19177,14 +19246,17 @@ async function resolveUser(user) {
       if (both[1].status !== "fulfilled") { await refuse("login-check-denied"); return; }
       const lg = both[1].value.exists() ? both[1].value.data() : null;
       let devs = loginDevicesOf(lg);
-      const maxDev = Number(lg && lg.maxDevices) || DEFAULT_DEVICES, fp = deviceFp(), lbl = deviceLabel();
+      // fp + lblRaw: the old way (kept the same so a device stays recognised); lbl: the readable phone name
+      // for the teacher ("Android — Samsung Galaxy A14 (SM-A145F) · Chrome")
+      const maxDev = Number(lg && lg.maxDevices) || DEFAULT_DEVICES, fp = deviceFp(), lblRaw = deviceLabel();
+      let lbl = lblRaw; try { lbl = await deviceLabelNice(); } catch (e) {}
       let known = devs.some(function (d) { return d.id === dev; });
       // ♻️ an ALLOWED phone whose saved id was erased by the browser (not a new device): recognised by its
       // fingerprint and taken over at once — no code, no waiting for the teacher. Older entries without a
       // fingerprint: the same model + browser, when exactly one entry matches.
       if (devs.length && !known) {
         let match = fp ? devs.filter(function (d) { return d.fp && d.fp === fp; }) : [];
-        if (!match.length) match = devs.filter(function (d) { return !d.fp && d.label && d.label === lbl && !/^(Device|Linux) · Browser$/.test(lbl); });
+        if (!match.length) match = devs.filter(function (d) { return !d.fp && d.label && (d.label === lblRaw || d.label === lbl) && !/^(Device|Linux) · Browser$/.test(lblRaw) && !/\(K\)/.test(d.label); });
         if (match.length === 1) {
           const old = match[0];
           const list = devs.map(function (d) { return d === old ? Object.assign({}, d, { id: dev, fp: fp, label: lbl, relinkedAt: now, oldId: d.id }) : d; });
@@ -19201,6 +19273,11 @@ async function resolveUser(user) {
         let sent = true;
         try { await setDoc(doc(db, "logins", phone), { pendingDevice: { id: dev, label: lbl, fp: fp, ip: ip, at: now, code: code } }, { merge: true }); }
         catch (e) { sent = false; }
+        // 🚫 the teacher sees every try from a phone that is not allowed (the last 15)
+        try {
+          const tries = (Array.isArray(lg && lg.tries) ? lg.tries : []).concat([{ label: lbl, at: now, ip: ip || "" }]).slice(-15);
+          await setDoc(doc(db, "logins", phone), { tries: tries }, { merge: true });
+        } catch (e) {}
         await refuse(sent ? (canCode ? "device-code:" + code : "device-locked") : "device-locked-norequest");
         return;
       }
@@ -19211,7 +19288,9 @@ async function resolveUser(user) {
       else {
         // the fingerprint is kept with this device, so it is recognised again if its id is ever erased
         const me = devs.find(function (d) { return d.id === dev; });
-        if (!Array.isArray(lg.devices) || (me && fp && me.fp !== fp)) upd.devices = devs.map(function (d) { return d.id === dev && fp ? Object.assign({}, d, { fp: fp }) : d; });
+        // … and its readable phone name (older entries said only "Android (K) · Chrome")
+        if (!Array.isArray(lg.devices) || (me && ((fp && me.fp !== fp) || (lbl && me.label !== lbl))))
+          upd.devices = devs.map(function (d) { return d.id === dev ? Object.assign({}, d, fp ? { fp: fp } : {}, lbl ? { label: lbl } : {}) : d; });
       }
       try { await setDoc(doc(db, "logins", phone), upd, { merge: true }); } catch (e) {}
       lsSet(STU_OK_KEY, okMark);

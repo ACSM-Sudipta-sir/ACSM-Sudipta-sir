@@ -2481,8 +2481,8 @@ function cloudAuthMessage(code) {
   if (code === 'student-use-email') return 'Login with your e-mail ID now (not the phone number). Ask your teacher to add your e-mail if you have not received the password e-mail.';
   if (code === 'not-registered-email') return 'This e-mail is not registered for any student. Please ask your teacher to add your e-mail in the admission form.';
   if (code === 'student-not-activated') return 'Your account is not activated yet. Press “First-time login” and verify your phone by SMS.';
-  if (String(code).indexOf('device-code:') === 0) return '📱 This is a new device. Open the portal on your other device and type the code ' + String(code).slice(12) + ' there, or ask your teacher.';
-  if (code === 'device-locked') return '🔒 All your allowed devices are in use. A request has been sent to your teacher — after the teacher allows this device, log in again.';
+  if (String(code).indexOf('device-code:') === 0) return '✅ Your password is correct. 📱 But this phone / browser is not known yet. Open the portal on your other device and type the code ' + String(code).slice(12) + ' there, or ask your teacher.';
+  if (code === 'device-locked') return '✅ Your password is correct. 🔒 But all your allowed devices are in use. A request has been sent to your teacher — after the teacher allows this device, log in again.';
   if (code === 'device-locked-norequest') return '🔒 Your account is registered on other devices. Please tell your teacher — the teacher can allow this device from 📱 Devices.';
   if (code === 'login-check-denied') return 'Could not check your login security (permission denied). Please tell your teacher to publish the new Firestore rules.';
   if (code === 'not-admin') return 'This account is not the admin account of this portal.';
@@ -2499,7 +2499,8 @@ function showLoginNote(html) {
 window.onCloudAuth = function(info) {
   if (info.error) showToast(cloudAuthMessage(info.error), 'error');
   if (info.error && String(info.error).indexOf('device-code:') === 0) {
-    showLoginNote('<b>📱 New device — add it in 1 minute</b><br>' +
+    showLoginNote('<b>✅ Password correct — 📱 this device only needs to be added (1 minute)</b><br>' +
+      '<span style="font-size:0.85em;">Tip: always open the portal the same way (the installed app, or Chrome) — not from a WhatsApp link, which opens a different browser.</span><br>' +
       '1. Take the phone (or computer) you already use for this portal and log in there.<br>' +
       '2. A box “Add a new device?” opens there — type this code → <b>➕ Add device</b>:<br>' +
       '<div style="font-size:2rem; font-weight:900; letter-spacing:6px; color:#fcd34d; text-align:center; margin:8px 0;">' + esc(String(info.error).slice(12)) + '</div>' +
@@ -3531,7 +3532,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261124005456';
+var APP_BUILD = '20261124180615';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -6627,7 +6628,7 @@ async function addMyDevice() {
   if (devs.length >= max) { showToast('All ' + max + ' device places are used. Ask your teacher to remove one.', 'error'); return; }
   try {
     if (!Array.isArray(lg.devices)) await FBAPI.loginSet(u.id, { devices: devs });   // an older record: the list first
-    var list = devs.concat([{ id: p.id, label: p.label || '', boundAt: Date.now(), ip: p.ip || '' }]);
+    var list = devs.concat([{ id: p.id, label: p.label || '', fp: p.fp || '', boundAt: Date.now(), ip: p.ip || '' }]);
     await FBAPI.loginSet(u.id, { devices: list, pendingDevice: null });
     var bx = document.getElementById('dev-code-box'); if (bx) bx.remove();
     showToast('✅ Device added. Press Login on that device now.', 'success');
@@ -7831,7 +7832,7 @@ async function approveDevice(phone, btn) {
     devs.sort(function(a, b) { return Number(seen[a.id] || a.boundAt || 0) - Number(seen[b.id] || b.boundAt || 0); });
     devs = devs.slice(devs.length - max + 1);
   }
-  devs.push({ id: p.id, label: p.label || '', boundAt: Date.now(), ip: p.ip || '' });
+  devs.push({ id: p.id, label: p.label || '', fp: p.fp || '', boundAt: Date.now(), ip: p.ip || '' });
   try {
     await FBAPI.loginSet(phone, { devices: devs, deviceId: devs[0].id, deviceLabel: devs[0].label || '', boundAt: devs[0].boundAt || null, pendingDevice: null });
     deviceReqs = deviceReqs.filter(function(x) { return x.phone !== phone; });
@@ -14496,6 +14497,50 @@ function hwGradeBadge(f, t) {
   var p = hwPct(f, t), g = hwGrade(p);
   return g ? '<span style="display:inline-block; margin-left:6px; padding:1px 10px; border-radius:999px; background:' + g.color + '; color:#fff; font-weight:800;">' + g.label + ' • ' + p + '%</span>' : '';
 }
+// 🔁 checking a REDO copy: the student sends only the questions that were wrong. The questions that were already
+// correct in the earlier check stay correct ("✔ correct in your first copy") — they are not "not attempted" — and the
+// % / grade / redo rule then count the WHOLE homework. old = the earlier feedback of this student.
+function hwQKey(label) { return String(label || '').toLowerCase().replace(/^\s*q(?:uestion)?\.?\s*/, '').replace(/[\s.]+/g, ''); }
+function hwMergeRedo(fbNew, old, sub) {
+  if (!fbNew || !old || old.status !== 'checked' || !Array.isArray(old.qtable)) return fbNew;
+  // only a copy sent AFTER the earlier check is a redo
+  if (sub && !(Number(sub.uploadedAt || 0) > Number(old.checkedAt || 0))) return fbNew;
+  var done = {};
+  (old.doneQs || []).forEach(function(k) { done[k] = 1; });
+  old.qtable.forEach(function(r) { if (fbVerdictOf(r.verdict) === 'ok') done[hwQKey(r.q)] = 1; });
+  var keys = Object.keys(done);
+  if (!keys.length) return fbNew;
+  var rows = Array.isArray(fbNew.qtable) ? fbNew.qtable.slice() : [], have = {}, carried = 0;
+  rows = rows.map(function(r) {
+    var k = hwQKey(r.q); have[k] = 1;
+    var v = fbVerdictOf(r.verdict);
+    if (done[k] && (v === 'skipped' || !r.verdict)) { carried++; return Object.assign({}, r, { verdict: 'ok', note: '✔ correct in your first copy', box: undefined, page: undefined }); }
+    return r;
+  });
+  // questions of the first copy that the redo did not mention at all
+  old.qtable.forEach(function(r) {
+    var k = hwQKey(r.q);
+    if (done[k] && !have[k]) { rows.push({ q: r.q, verdict: 'ok', note: '✔ correct in your first copy' }); have[k] = 1; carried++; }
+  });
+  rows.forEach(function(r) { if (r.box === undefined) delete r.box; if (r.page === undefined) delete r.page; });
+  fbNew.qtable = rows;
+  // "Questions you left out" never lists the ones that were already done
+  if (Array.isArray(fbNew.skipped)) fbNew.skipped = fbNew.skipped.filter(function(s) { return !done[hwQKey(String(s).split(':')[0])]; });
+  var allDone = {};
+  keys.forEach(function(k) { allDone[k] = 1; });
+  rows.forEach(function(r) { if (fbVerdictOf(r.verdict) === 'ok') allDone[hwQKey(r.q)] = 1; });
+  fbNew.doneQs = Object.keys(allDone);
+  fbNew.redoRound = Number(old.redoRound || 0) + 1;
+  if (carried) {
+    // the % of the WHOLE homework (the AI's own % would count only the redo copy)
+    var s = 0; rows.forEach(function(r) { var v = fbVerdictOf(r.verdict); s += v === 'ok' ? 1 : (v === 'slip' ? 0.5 : 0); });
+    fbNew.pct = Math.round(s / rows.length * 100);
+    fbNew.mergedFrom = carried;
+    // the AI's "resubmit" looked at the half copy only: the redo rule (below the teacher's %) decides on the whole work
+    fbNew.resubmit = false;
+  }
+  return fbNew;
+}
 // the redo rule: below the teacher's % the student MUST correct and submit again (the hints show what to do)
 function hwApplyRedoRule(fb, t) {
   var p = hwPct(fb, t);
@@ -16456,6 +16501,7 @@ function hwCheckJson() {
       });
     }
     fbNew._gone = gone.filter(function(x, i, a) { return x && a.indexOf(x) === i; });
+    hwMergeRedo(fbNew, (hwDetail.fb || {})[p], (hwDetail.subs || {})[p]);   // 🔁 a redo copy: the questions already correct stay correct
     hwPreview.push(hwApplyRedoRule(fbNew, t));    // 🏅 grade + 🔁 automatic redo below the teacher's %
   });
   if (!hwPreview.length) { box.innerHTML = '<p style="color:#fca5a5;">No student of this class was found in the JSON' + (unknown.length ? ' (numbers: ' + esc(unknown.join(', ')) + ')' : '') + '.</p>'; return; }
@@ -16463,7 +16509,8 @@ function hwCheckJson() {
     (unknown.length ? '<p style="color:#fcd34d; font-size:0.82rem;">⚠️ Skipped (not in this class): ' + esc(unknown.join(', ')) + '</p>' : '') +
     '<div class="qb-table-wrap"><table class="qb-table"><thead><tr><th>Student</th>' + (k.marks ? '<th>Marks</th>' : '') + '<th>Remark</th><th>Found</th></tr></thead><tbody>' +
     hwPreview.map(function(f) {
-      return '<tr><td><b>' + esc(byId[f.studentId].fullName) + '</b>' + (d.fb[f.studentId] ? '<br><span style="font-size:0.7rem; color:#fcd34d;">replaces old feedback</span>' : '') + '</td>' +
+      return '<tr><td><b>' + esc(byId[f.studentId].fullName) + '</b>' + (d.fb[f.studentId] ? '<br><span style="font-size:0.7rem; color:#fcd34d;">replaces old feedback</span>' : '') +
+        (f.mergedFrom ? '<br><span style="font-size:0.72rem; color:#6ee7b7;">🔁 redo copy: ' + f.mergedFrom + ' question(s) already correct in the first copy kept ✔ • whole work ' + f.pct + '%' + (f.resubmit ? ' — redo still needed' : ' — no more redo') + '</span>' : '') + '</td>' +
         (k.marks ? '<td>' + (f.marks === null ? '—' : f.marks + ' / ' + t.maxMarks) + '</td>' : '') +
         '<td style="font-size:0.8rem;">' + esc(f.remark) + (f._gone && f._gone.length ? '<div style="color:#fcd34d; font-size:0.74rem; margin-top:3px;">🛡 Removed — not in this task: ' + esc(f._gone.join(', ')) + '</div>' : '') + '</td><td style="font-size:0.78rem;">' + ((f.errors || []).length ? (f.errors.length + ' errors (' + f.errors.filter(function(e) { return e.page && e.box; }).length + ' with a box) • ') : '') + ((f.qtable || []).length ? f.qtable.length + ' Qs • ' : '') + f.mistakes.length + ' mistakes • ' + f.missed.length + ' missed • ' + f.hints.length + ' hints</td></tr>';
     }).join('') + '</tbody></table></div>' +
@@ -19019,15 +19066,34 @@ function loginDevicesOf(lg) {
   if (Array.isArray(lg.devices)) return lg.devices.filter(function (d) { return d && d.id; });
   return lg.deviceId ? [{ id: lg.deviceId, label: lg.deviceLabel || "", boundAt: lg.boundAt || 0, ip: lg.firstIp || "" }] : [];
 }
-// One random id per browser/device, kept in localStorage.
+// One random id per browser/device, kept in localStorage AND a cookie (a phone that clears one of them —
+// low space, Safari after 7 days, a WhatsApp in-app browser — still finds it in the other).
+function devCookieGet() { try { const m = document.cookie.match(/(?:^|;\s*)acsm_dev=([A-Za-z0-9-]{8,64})/); return m ? m[1] : ""; } catch (e) { return ""; } }
+function devCookieSet(id) { try { document.cookie = "acsm_dev=" + id + "; max-age=34560000; path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : ""); } catch (e) {} }
 function deviceId() {
   let id = "";
   try { id = localStorage.getItem("acsm_device_id") || ""; } catch (e) {}
+  const ck = devCookieGet();
+  if (!id && ck) { id = ck; try { localStorage.setItem("acsm_device_id", id); } catch (e) {} }   // restored from the cookie
   if (!id) {
     id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
     try { localStorage.setItem("acsm_device_id", id); } catch (e) {}
   }
+  if (ck !== id) devCookieSet(id);
   return id;
+}
+// 🔎 the same phone + browser, even when its saved id was erased: model, browser, screen, cores, memory, time zone,
+// language. Used ONLY to recognise a device that was already allowed (the password is still needed).
+function deviceFp() {
+  try {
+    const s = window.screen || {}, a = Math.max(s.width || 0, s.height || 0), b = Math.min(s.width || 0, s.height || 0);
+    let tz = ""; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) {}
+    const raw = [deviceLabel(), a + "x" + b, Math.round((window.devicePixelRatio || 1) * 100), navigator.hardwareConcurrency || "", navigator.deviceMemory || "",
+      navigator.maxTouchPoints || 0, navigator.platform || "", tz, (navigator.language || "").toLowerCase()].join("|");
+    let h1 = 5381, h2 = 52711;
+    for (let i = 0; i < raw.length; i++) { const c = raw.charCodeAt(i); h1 = (h1 * 33) ^ c; h2 = (h2 * 33) ^ c; }
+    return "fp" + (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
+  } catch (e) { return ""; }
 }
 function deviceLabel() {
   const ua = navigator.userAgent || "";
@@ -19110,14 +19176,30 @@ async function resolveUser(user) {
       // (📱 My Devices), or the teacher allows it. When the limit is reached only the teacher can allow it.
       if (both[1].status !== "fulfilled") { await refuse("login-check-denied"); return; }
       const lg = both[1].value.exists() ? both[1].value.data() : null;
-      const devs = loginDevicesOf(lg), maxDev = Number(lg && lg.maxDevices) || DEFAULT_DEVICES;
-      const known = devs.some(function (d) { return d.id === dev; });
+      let devs = loginDevicesOf(lg);
+      const maxDev = Number(lg && lg.maxDevices) || DEFAULT_DEVICES, fp = deviceFp(), lbl = deviceLabel();
+      let known = devs.some(function (d) { return d.id === dev; });
+      // ♻️ an ALLOWED phone whose saved id was erased by the browser (not a new device): recognised by its
+      // fingerprint and taken over at once — no code, no waiting for the teacher. Older entries without a
+      // fingerprint: the same model + browser, when exactly one entry matches.
+      if (devs.length && !known) {
+        let match = fp ? devs.filter(function (d) { return d.fp && d.fp === fp; }) : [];
+        if (!match.length) match = devs.filter(function (d) { return !d.fp && d.label && d.label === lbl && !/^(Device|Linux) · Browser$/.test(lbl); });
+        if (match.length === 1) {
+          const old = match[0];
+          const list = devs.map(function (d) { return d === old ? Object.assign({}, d, { id: dev, fp: fp, label: lbl, relinkedAt: now, oldId: d.id }) : d; });
+          try {
+            await setDoc(doc(db, "logins", phone), { devices: list, deviceId: list[0].id, deviceLabel: list[0].label || "", pendingDevice: null }, { merge: true });
+            devs = list; known = true;
+          } catch (e) {}
+        }
+      }
       if (devs.length && !known) {
         const ip = await publicIp();
         const canCode = devs.length < maxDev;
         const code = canCode ? String(100000 + Math.floor(Math.random() * 900000)) : "";
         let sent = true;
-        try { await setDoc(doc(db, "logins", phone), { pendingDevice: { id: dev, label: deviceLabel(), ip: ip, at: now, code: code } }, { merge: true }); }
+        try { await setDoc(doc(db, "logins", phone), { pendingDevice: { id: dev, label: lbl, fp: fp, ip: ip, at: now, code: code } }, { merge: true }); }
         catch (e) { sent = false; }
         await refuse(sent ? (canCode ? "device-code:" + code : "device-locked") : "device-locked-norequest");
         return;
@@ -19125,8 +19207,12 @@ async function resolveUser(user) {
       const first = !devs.length;
       const upd = { lastLoginAt: now, lastDev: dev, seen: {} };
       upd.seen[dev] = now;
-      if (first) Object.assign(upd, { phone: phone, devices: [{ id: dev, label: deviceLabel(), boundAt: now, ip: "" }], deviceId: dev, deviceLabel: deviceLabel(), boundAt: now, pendingDevice: null });
-      else if (!Array.isArray(lg.devices)) upd.devices = devs;   // an older record (one deviceId): moved to the list once
+      if (first) Object.assign(upd, { phone: phone, devices: [{ id: dev, label: lbl, fp: fp, boundAt: now, ip: "" }], deviceId: dev, deviceLabel: lbl, boundAt: now, pendingDevice: null });
+      else {
+        // the fingerprint is kept with this device, so it is recognised again if its id is ever erased
+        const me = devs.find(function (d) { return d.id === dev; });
+        if (!Array.isArray(lg.devices) || (me && fp && me.fp !== fp)) upd.devices = devs.map(function (d) { return d.id === dev && fp ? Object.assign({}, d, { fp: fp }) : d; });
+      }
       try { await setDoc(doc(db, "logins", phone), upd, { merge: true }); } catch (e) {}
       lsSet(STU_OK_KEY, okMark);
       if (!shown) {

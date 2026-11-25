@@ -3532,7 +3532,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261125232824';
+var APP_BUILD = '20261125233729';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -3553,9 +3553,31 @@ function checkAppUpdate() {
     if (j && j.v && String(j.v) > APP_BUILD) showUpdateBanner(String(j.v));
   }).catch(function() {});
 }
+// 🔄 students get every update BY THEMSELVES — at a safe moment only: just after the app was opened or came
+// back on screen, and never during an exam, an upload, an open window or while typing. The teacher keeps the button.
+var appOpenedAt = Date.now(), appVisibleAt = Date.now();
+document.addEventListener('visibilitychange', function() { if (document.visibilityState === 'visible') appVisibleAt = Date.now(); });
+function updateSafeNow() {
+  if (typeof cloud !== 'undefined' && cloud.role === 'admin') return false;
+  if (typeof examState !== 'undefined' && (examState || examStarting)) return false;
+  if (Date.now() - appOpenedAt > 90000 && Date.now() - appVisibleAt > 60000) return false;   // not right after opening
+  var m = document.getElementById('row-editor-modal');
+  if (m && !m.classList.contains('hidden')) return false;                                    // a window (upload, PDF …) is open
+  var a = document.activeElement;
+  if (a && /INPUT|TEXTAREA/.test(a.tagName) && String(a.value || '').trim()) return false;   // typing something
+  if (document.getElementById('pdf-pick-box') || document.getElementById('dev-code-box')) return false;
+  return true;
+}
 function showUpdateBanner(v) {
-  if (updateShownFor === v || document.getElementById('update-banner')) return;
   if (typeof examState !== 'undefined' && examState) return;          // never during an exam (asked again later)
+  // students: updated at once, no tap needed (once per version per 10 min — never a reload loop)
+  var tried = ''; try { tried = sessionStorage.getItem('acsm_auto_upd') || ''; } catch (e) {}
+  if (updateSafeNow() && !(tried.split('|')[0] === v && Date.now() - Number(tried.split('|')[1] || 0) < 600000)) {
+    try { sessionStorage.setItem('acsm_auto_upd', v + '|' + Date.now()); } catch (e) {}
+    var ob = document.getElementById('update-banner'); if (ob) ob.remove();
+    updateShownFor = v; applyAppUpdate(v); return;
+  }
+  if (updateShownFor === v || document.getElementById('update-banner')) return;
   updateShownFor = v;
   var b = document.createElement('div');
   b.id = 'update-banner';
@@ -3569,6 +3591,7 @@ function showUpdateBanner(v) {
 async function applyAppUpdate(v) {
   var b = document.getElementById('update-banner');
   if (b) b.innerHTML = '<div style="flex:1; text-align:center; font-weight:800;">⏳ Updating…</div>';
+  else { try { cloudOverlay(true, '🔄 Getting the newest version…'); } catch (e) {} }
   try { var regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(function(r) { return r.update().catch(function() {}); })); } catch (e) {}
   try { var keys = await caches.keys(); await Promise.all(keys.map(function(k) { return caches.delete(k); })); } catch (e) {}
   try { sessionStorage.setItem('acsm_just_updated', '1'); } catch (e) {}
@@ -14544,31 +14567,89 @@ function hwGradeBadge(f, t) {
 // correct in the earlier check stay correct ("✔ correct in your first copy") — they are not "not attempted" — and the
 // % / grade / redo rule then count the WHOLE homework. old = the earlier feedback of this student.
 function hwQKey(label) { return String(label || '').toLowerCase().replace(/^\s*q(?:uestion)?\.?\s*/, '').replace(/[\s.]+/g, ''); }
-function hwMergeRedo(fbNew, old, sub) {
-  if (!fbNew || !old || old.status !== 'checked' || !Array.isArray(old.qtable)) return fbNew;
+// every question number in a text: "Q1–Q20" → 1…20, "Q4, Q7" → 4, 7
+function hwNumsIn(s) {
+  var out = [];
+  String(s || '').replace(/(\d{1,3})\s*(?:[-–—]|to)\s*Q?\.?\s*(\d{1,3})/gi, function(m, a, b) {
+    a = Number(a); b = Number(b);
+    if (b >= a && b - a < 200) for (var i = a; i <= b; i++) out.push(i);
+    return ' ';
+  }).replace(/\d{1,3}/g, function(m) { out.push(Number(m)); return m; });
+  return out;
+}
+// a copy sent AFTER the earlier check = a redo copy
+function hwIsRedo(old, sub) { return !!(old && old.status === 'checked' && sub && Number(sub.uploadedAt || 0) > Number(old.checkedAt || 0)); }
+// what was already right in the earlier check: { keys: {"1":1,"5(a)":1}, nums: {1:1, …} (whole question right), labels: [...] }
+function hwDoneBefore(old, t) {
+  var keys = {}, rowsBy = {};
+  (old && old.doneQs || []).forEach(function(k) { keys[k] = 1; });
+  if (old && Array.isArray(old.qtable) && old.qtable.length) {
+    old.qtable.forEach(function(r) {
+      var n = hwQNumOf(r.q), ok = fbVerdictOf(r.verdict) === 'ok';
+      if (ok) keys[hwQKey(r.q)] = 1;
+      if (n) { rowsBy[n] = rowsBy[n] || { all: 0, ok: 0 }; rowsBy[n].all++; if (ok) rowsBy[n].ok++; }
+    });
+  } else if (old && t) {
+    // an earlier check written by hand (no question table): every question of the task that was NOT named as
+    // wrong / left out / missed is taken as done
+    var qn = hwQuestionNumbers(t), bad = {};
+    if (qn.length) {
+      (old.skipped || []).forEach(function(s) { hwNumsIn(s).forEach(function(n) { bad[n] = 1; }); });
+      ['mistakes', 'missed', 'hints'].forEach(function(k) { (old[k] || []).forEach(function(s) { var n = hwQNumOf(String(s).split(':')[0]); if (n) bad[n] = 1; }); });
+      (old.errors || []).forEach(function(e) { var n = hwQNumOf(e.q); if (n) bad[n] = 1; });
+      qn.forEach(function(n) { if (!bad[n]) keys[String(n)] = 1; });
+    }
+  }
+  var nums = {};
+  Object.keys(keys).forEach(function(k) { if (/^\d+$/.test(k)) nums[Number(k)] = 1; });
+  Object.keys(rowsBy).forEach(function(n) { if (rowsBy[n].all && rowsBy[n].ok === rowsBy[n].all) nums[n] = 1; });
+  return { keys: keys, nums: nums, labels: Object.keys(keys) };
+}
+// "Q1–Q20, Q24" for the teacher / the prompt
+function hwNumsText(nums) {
+  var a = Object.keys(nums).map(Number).sort(function(x, y) { return x - y; }), out = [];
+  for (var i = 0; i < a.length; i++) { var s = a[i]; while (i + 1 < a.length && a[i + 1] === a[i] + 1) i++; out.push(s === a[i] ? 'Q' + s : 'Q' + s + '–Q' + a[i]); }
+  return out.join(', ');
+}
+function hwMergeRedo(fbNew, old, sub, t) {
+  if (!fbNew || !old || old.status !== 'checked') return fbNew;
   // only a copy sent AFTER the earlier check is a redo
-  if (sub && !(Number(sub.uploadedAt || 0) > Number(old.checkedAt || 0))) return fbNew;
-  var done = {};
-  (old.doneQs || []).forEach(function(k) { done[k] = 1; });
-  old.qtable.forEach(function(r) { if (fbVerdictOf(r.verdict) === 'ok') done[hwQKey(r.q)] = 1; });
+  if (sub && !hwIsRedo(old, sub)) return fbNew;
+  var db0 = hwDoneBefore(old, t || (hwDetail && hwDetail.task));
+  var done = db0.keys;
   var keys = Object.keys(done);
   if (!keys.length) return fbNew;
+  // the lists never name a question that was already right ("Q1–Q20" ranges too), unless it is wrong now
+  var wrongNow = {};
+  (fbNew.qtable || []).forEach(function(r) { var v = fbVerdictOf(r.verdict); if (v === 'wrong' || v === 'slip') wrongNow[hwQKey(r.q)] = 1; });
+  var doneLabel = function(lab) { var k = hwQKey(lab), n = hwQNumOf(lab); return !wrongNow[k] && (done[k] || (n && db0.nums[n] && !/[a-z(]/i.test(k.replace(/^\d+/, '')))); };
+  ['missed', 'hints', 'mistakes'].forEach(function(key) {
+    if (Array.isArray(fbNew[key])) fbNew[key] = fbNew[key].filter(function(s) { var lab = String(s).split(':')[0]; return !(/\d/.test(lab) && lab.length < 24 && doneLabel(lab)); });
+  });
+  if (Array.isArray(fbNew.skipped)) fbNew.skipped = fbNew.skipped.map(function(s) {
+    var ns = hwNumsIn(s);
+    if (!ns.length) return s;
+    var left = ns.filter(function(n) { return !db0.nums[n]; });
+    if (!left.length) return '';
+    return left.length === ns.length ? s : hwNumsText(left.reduce(function(o, n) { o[n] = 1; return o; }, {}));
+  }).filter(Boolean);
   var rows = Array.isArray(fbNew.qtable) ? fbNew.qtable.slice() : [], have = {}, carried = 0;
   rows = rows.map(function(r) {
-    var k = hwQKey(r.q); have[k] = 1;
+    var k = hwQKey(r.q), n = hwQNumOf(r.q); have[k] = 1;
     var v = fbVerdictOf(r.verdict);
-    if (done[k] && (v === 'skipped' || !r.verdict)) { carried++; return Object.assign({}, r, { verdict: 'ok', note: '✔ correct in your first copy', box: undefined, page: undefined }); }
+    if ((done[k] || (n && db0.nums[n])) && (v === 'skipped' || !r.verdict)) { carried++; return Object.assign({}, r, { verdict: 'ok', note: '✔ correct in your first copy', box: undefined, page: undefined }); }
     return r;
   });
   // questions of the first copy that the redo did not mention at all
-  old.qtable.forEach(function(r) {
+  var oldRows = Array.isArray(old.qtable) && old.qtable.length ? old.qtable : keys.map(function(k) { return { q: /^\d/.test(k) ? 'Q' + k : k }; });
+  oldRows.forEach(function(r) {
     var k = hwQKey(r.q);
     if (done[k] && !have[k]) { rows.push({ q: r.q, verdict: 'ok', note: '✔ correct in your first copy' }); have[k] = 1; carried++; }
   });
   rows.forEach(function(r) { if (r.box === undefined) delete r.box; if (r.page === undefined) delete r.page; });
+  // in question order
+  rows.sort(function(a, b) { return (hwQNumOf(a.q) || 999) - (hwQNumOf(b.q) || 999); });
   fbNew.qtable = rows;
-  // "Questions you left out" never lists the ones that were already done
-  if (Array.isArray(fbNew.skipped)) fbNew.skipped = fbNew.skipped.filter(function(s) { return !done[hwQKey(String(s).split(':')[0])]; });
   var allDone = {};
   keys.forEach(function(k) { allDone[k] = 1; });
   rows.forEach(function(r) { if (fbVerdictOf(r.verdict) === 'ok') allDone[hwQKey(r.q)] = 1; });
@@ -15367,7 +15448,14 @@ function hwCopyPrompt() {
   var d = hwDetail, t = d.task, k = HW_KINDS[hwKind(t)];
   var phones = hwZipPhones();
   if (!phones.length) { showToast('Nobody has submitted yet.', 'error'); return; }
-  var recheck = phones.some(function(p) { return d.fb[p] && d.fb[p].status === 'checked'; });
+  // 🔁 redo copies: the student sent only the questions that were wrong / left out — the rest is already done
+  var redoLines = phones.map(function(p) {
+    var old = d.fb[p];
+    if (!hwIsRedo(old, d.subs[p])) return '';
+    var db0 = hwDoneBefore(old, t), txt = hwNumsText(db0.nums) || db0.labels.map(function(k) { return /^\d/.test(k) ? 'Q' + k : k; }).join(', ');
+    return txt ? '- ' + p + ': ALREADY CORRECT in the first copy: ' + txt : '';
+  }).filter(Boolean);
+  var recheck = phones.some(function(p) { return d.fb[p] && d.fb[p].status === 'checked' && !hwIsRedo(d.fb[p], d.subs[p]); });
   var byId = {};
   DB.get(K.U).forEach(function(u) { byId[u.id] = u; });
   var list = phones.map(function(p) {
@@ -15383,6 +15471,8 @@ function hwCopyPrompt() {
     (qn.length ? 'THE ONLY QUESTION NUMBERS IN THIS TASK: ' + qn.map(function(n) { return 'Q' + n; }).join(', ') + '\n' : '') + '\n' +
     'I am attaching ' + phones.length + ' PDF file(s). The student\'s number is inside each file name. In every file: page 1 = the student\'s name, ACSM ID and the questions; then the question paper; then the student\'s handwritten pages:\n' + list + '\n\n' +
     (recheck ? 'This is a RE-CHECK: check every sheet again from the beginning, carefully and independently.\n\n' : '') +
+    (redoLines.length ? 'CORRECTED COPIES (sent again after the first check, with ONLY the questions that were wrong or left out):\n' + redoLines.join('\n') + '\n' +
+      'For these students the questions listed above are ALREADY DONE: put each of them in "questions" with verdict "correct" and note "done in the first copy". NEVER list them in "skipped", "missed", "hints" or "errors". Check only the questions in the new copy. "percent" = the WHOLE task including the questions already done. "resubmit" = true only if a question in the new copy is still wrong or still missing.\n\n' : '') +
     '⚠️ STRICT RULES — a student must never be blamed for something that is not on the paper:\n' +
     '1. Use ONLY the questions of THIS task (the question paper / the list above). NEVER mention a question number that is not in the task. Never invent a question, a part, a number or a mistake.\n' +
     '2. First find, for every question of the task, WHERE the student answered it (which handwritten page). A question with no answer anywhere goes to "skipped" — no error for it.\n' +
@@ -16579,8 +16669,13 @@ function openHwFeedbackModal(phone) {
   var d = hwDetail, t = d.task, k = HW_KINDS[hwKind(t)];
   var u = DB.get(K.U).find(function(x) { return x.id === phone; }) || { id: phone };
   var f = d.fb[phone] || {};
+  // 🔁 a corrected copy (sent after the first check): the boxes start EMPTY — write only what is still wrong;
+  // everything not named here counts as done (the questions already right stay right)
+  var redo = hwIsRedo(f, d.subs[phone]), doneTxt = redo ? hwNumsText(hwDoneBefore(f, t).nums) : '';
+  if (redo) f = { remark: '', overall: '', pct: null, mistakes: [], missed: [], skipped: [], hints: [], resubmit: false, marks: f.marks, qtable: f.qtable, errors: [] };
   document.getElementById('row-editor-body').innerHTML =
     '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h3 style="margin:0;">✍️ Feedback — ' + esc(u.fullName || phone) + '</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
+    (redo ? '<div style="margin:0 0 10px 0; padding:9px 11px; border-radius:10px; background:rgba(16,185,129,0.12); border:1px solid #059669; color:#a7f3d0; font-size:0.84rem;">🔁 <b>Corrected copy</b> (sent ' + fmtDateTime(d.subs[phone].uploadedAt) + ').' + (doneTxt ? ' Already right in the first copy: <b>' + esc(doneTxt) + '</b> — they stay ✔.' : '') + '<br>Write below ONLY what is <b>still</b> wrong or missing. Everything else counts as done — leave the boxes empty if all is corrected.</div>' : '') +
     (d.subs[phone] ? '<button type="button" class="btn btn-slate btn-sm" style="margin-bottom:8px;" onclick="hwDownloadOne(\'' + escA(phone) + '\')">⬇️ Download the PDF</button>' : '<p style="color:#fca5a5; margin:0 0 8px 0;">This student has not uploaded anything.</p>') +
     (k.marks ? '<label class="label">Marks (out of ' + t.maxMarks + ')</label><input type="number" id="hwf-marks" class="input" min="0" max="' + t.maxMarks + '" step="0.5" value="' + (f.marks === null || f.marks === undefined ? '' : f.marks) + '">' : '') +
     '<label class="label">🏅 How much is done correctly (%)' + (k.marks ? ' — empty = worked out from the marks' : '') + '</label><input type="number" id="hwf-pct" class="input" min="0" max="100" step="5" value="' + (f.pct === undefined || f.pct === null ? '' : f.pct) + '" placeholder="e.g. 100, 80, 50">' +
@@ -16617,6 +16712,29 @@ async function hwSaveManual(phone) {
   var pv = document.getElementById('hwf-pct').value.trim();
   if (pv !== '' && (isNaN(Number(pv)) || Number(pv) < 0 || Number(pv) > 100)) { showToast('The % must be between 0 and 100.', 'error'); return; }
   fb.pct = pv === '' ? null : Number(pv);
+  // 🔁 a corrected copy checked by hand: the question table is made again — the questions right before stay ✔,
+  // the ones the teacher names now (left out / mistakes / missed) are marked, everything else is "corrected"
+  var oldF = d.fb[phone];
+  if (hwIsRedo(oldF, d.subs[phone])) {
+    var named = {};
+    (fb.skipped || []).forEach(function(s) { hwNumsIn(s).forEach(function(n) { named[n] = 'skipped'; }); });
+    (fb.mistakes || []).concat(fb.missed || []).forEach(function(s) { var n = hwQNumOf(String(s).split(':')[0]); if (n && !named[n]) named[n] = 'wrong'; });
+    var db0 = hwDoneBefore(oldF, t), qnAll = hwQuestionNumbers(t);
+    var base = Array.isArray(oldF.qtable) && oldF.qtable.length ? oldF.qtable : qnAll.map(function(n) { return { q: 'Q' + n, verdict: db0.nums[n] ? 'ok' : 'wrong' }; });
+    fb.qtable = base.map(function(r) {
+      var n = hwQNumOf(r.q), was = fbVerdictOf(r.verdict);
+      if (n && named[n]) return { q: r.q, verdict: named[n], note: named[n] === 'skipped' ? 'still not done' : 'still has a mistake — see the hints' };
+      if (was === 'ok') return { q: r.q, verdict: 'ok', note: '✔ correct in your first copy' };
+      return { q: r.q, verdict: 'ok', note: '✔ corrected in your new copy' };
+    });
+    fb.errors = [];                                    // the circles of the first copy do not belong to this copy
+    fb.doneQs = fb.qtable.filter(function(r) { return r.verdict === 'ok'; }).map(function(r) { return hwQKey(r.q); });
+    fb.redoRound = Number(oldF.redoRound || 0) + 1;
+    if (fb.pct === null && fb.qtable.length) {
+      var sc = 0; fb.qtable.forEach(function(r) { sc += r.verdict === 'ok' ? 1 : 0; });
+      fb.pct = Math.round(sc / fb.qtable.length * 100);
+    }
+  }
   hwApplyRedoRule(fb, t);     // 🏅 grade + 🔁 must redo when below the teacher's %
   if (fb.status === 'missing') fb.lockWarn = missLockWarnText() || '⚠️ Submit it now. If you do not submit your homework / assignments, your portal will be LOCKED and you will not be able to use your student login until your teacher opens it again.';
   try {
@@ -19264,7 +19382,14 @@ async function resolveUser(user) {
       // fingerprint: the same model + browser, when exactly one entry matches.
       if (devs.length && !known) {
         let match = fp ? devs.filter(function (d) { return d.fp && d.fp === fp; }) : [];
-        if (!match.length) match = devs.filter(function (d) { return !d.fp && d.label && (d.label === lblRaw || d.label === lbl) && !/^(Device|Linux) · Browser$/.test(lblRaw) && !/\(K\)/.test(d.label); });
+        // entries allowed BEFORE the fingerprint existed (most Android ones only say "Android (K) · Chrome"):
+        // the same phone type + browser takes its place — if two match, the one used longest ago
+        if (!match.length) match = devs.filter(function (d) { return !d.fp && d.label && (d.label === lblRaw || d.label === lbl) && !/^(Device|Linux) · Browser$/.test(lblRaw); });
+        if (match.length > 1) {
+          const seen0 = (lg && lg.seen) || {};
+          match.sort(function (a, b) { return Number(seen0[a.id] || a.boundAt || 0) - Number(seen0[b.id] || b.boundAt || 0); });
+          match = [match[0]];
+        }
         if (match.length === 1) {
           const old = match[0];
           const list = devs.map(function (d) { return d === old ? Object.assign({}, d, { id: dev, fp: fp, label: lbl, relinkedAt: now, oldId: d.id }) : d; });
@@ -19273,6 +19398,15 @@ async function resolveUser(user) {
             devs = list; known = true;
           } catch (e) {}
         }
+      }
+      // ✅ a free device place (e.g. 1 of 2 used): the device is added AT ONCE — no code, no request to the
+      // teacher. Only a device beyond the allowed number has to wait for the teacher.
+      if (devs.length && !known && devs.length < maxDev) {
+        const list = devs.concat([{ id: dev, label: lbl, fp: fp, boundAt: now, ip: "", auto: true }]);
+        try {
+          await setDoc(doc(db, "logins", phone), { devices: list, pendingDevice: null }, { merge: true });
+          devs = list; known = true;
+        } catch (e) {}
       }
       if (devs.length && !known) {
         const ip = await publicIp();

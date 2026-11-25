@@ -2052,10 +2052,11 @@ function clearPrivateCache() {
   deviceAll = null; feeUnlocked = false;
   stuLastHtml = ''; stuLastTab = '';
   dataSeenOnce = {};          // after a logout / login the first data is not "new" again
+  qbArrivedOnce = false; hwFbLive = null;
 }
 
 // --- live refresh when another device changes data ---
-var liveTimer = null;
+var liveTimer = null, qbArrivedOnce = false;
 function refreshLiveViews() {
   clearTimeout(liveTimer);
   liveTimer = setTimeout(function() {
@@ -2377,6 +2378,21 @@ window.onCloudData = function(name, arr, pending) {
     } catch (e) {}
   }
   Store.mem[k] = JSON.stringify(arr);
+  if (name === 'questions') {
+    try { localStorage.setItem('acsm_qb_n', String(arr.length)); } catch (e) {}   // the dashboard count
+    // the bank has just arrived (it is read only when first needed): a window that was waiting for it is drawn again
+    if (!qbArrivedOnce && cloud.role === 'admin') {
+      qbArrivedOnce = true;
+      setTimeout(function() {
+        try {
+          var mb = document.getElementById('row-editor-body'), open = !document.getElementById('row-editor-modal').classList.contains('hidden');
+          if (open && mb && /ebSet\(/.test(mb.innerHTML) && typeof renderExamBuilderModalBody === 'function') renderExamBuilderModalBody();
+          if (open && document.getElementById('tqp-list') && tqPick) { tqPickChapters(); tqPickList(); }
+          if (!open && (currentAdminTab === 'inputq' || currentAdminTab === 'dash' || currentAdminTab === 'home')) switchAdminTab(currentAdminTab);
+        } catch (e) {}
+      }, 50);
+    }
+  }
   if (name === 'fees') updateFeeCorner();
   if (name === 'submissions' || name === 'users' || name === 'tests') scheduleClassStats();
   if (name === 'submissions' && cloud.role === 'admin') { updateWorkAlerts(); refreshExamCounts(); }
@@ -3539,7 +3555,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261126003651';
+var APP_BUILD = '20261126012948';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -3673,6 +3689,8 @@ var MONTH_FULL = ['January','February','March','April','May','June','July','Augu
 
 var DB = {
   get: function(k) {
+    // 💰 teacher: the Question Bank is read from the cloud only the first time something needs it
+    if (k === K.QB && typeof cloud !== 'undefined' && cloud.role === 'admin' && window.FBAPI && FBAPI.ensureColl) FBAPI.ensureColl('questions');
     try {
       var raw = Store.get(k);
       var d = JSON.parse(raw ? raw : '[]');
@@ -4245,7 +4263,9 @@ function switchAdminTab(tab) {
 // 1. ADMIN DASHBOARD
 // ============================================================================
 function renderAdminDashContent() {
-  var qb = DB.get(K.QB);
+  // the number of questions without reading the whole bank (the count remembered from the last time it was read)
+  var qbLoaded = window.FBAPI && FBAPI.isLoaded && FBAPI.isLoaded('questions');
+  var qb = qbLoaded ? DB.get(K.QB) : { length: (function() { try { return Number(localStorage.getItem('acsm_qb_n') || 0); } catch (e) { return 0; } })() };
   var parts = DB.get(K.PARTS);
   var stus = DB.get(K.U).filter(isActiveStu);
   var fees = DB.get(K.FEES);
@@ -9380,7 +9400,7 @@ function rankCardHtml(testId, waitText) {
 var rankStuCache = null, rankStuAt = 0, rankStuBusy = false;
 function loadStudentRanks(u, force) {
   if (!window.FBAPI || cloud.role !== 'student' || rankStuBusy) return;
-  if (!force && rankStuCache && Date.now() - rankStuAt < 120000) return;
+  if (!force && rankStuCache && Date.now() - rankStuAt < 20 * 60000) return;   // 💰 at most every 20 minutes
   rankStuBusy = true;
   FBAPI.rankForGroups(studentGroups(u)).then(function(list) { rankStuCache = list; })
     .catch(function() { if (!rankStuCache) rankStuCache = []; })
@@ -15050,15 +15070,25 @@ function stuGate() {
 }
 
 // 👩‍🏫 teacher's device: checks every student and locks those who reached the limit (students cannot change this)
-var missRunAt = 0, missRunning = false;
+var missRunAt = 0, missRunning = false, hwFbLive = null;
 async function runMissCheck(force) {
   var c = missCfg();
   if (cloud.role !== 'admin' || !cloud.ready || !c.on || missRunning || !window.FBAPI || !FBAPI.hwAllFeedback) return;
   if (!force && Date.now() - missRunAt < 5 * 60000) return;
   if (!adminDataLoaded()) { setTimeout(function() { runMissCheck(true); }, 15000); return; }
+  // 💰 the upload records come live already (hwSubsLive) and the feedback records are watched live (read once per
+  // session, then only the changes) — before, all of them were read again in full every 10 minutes
+  if (FBAPI.watchHwFeedback && !hwFbLive) {
+    FBAPI.watchHwFeedback(function(list) { var first = !hwFbLive; hwFbLive = list; if (first) setTimeout(function() { runMissCheck(true); }, 500); });
+    return;   // runs again as soon as the feedback list has arrived
+  }
   missRunning = true; missRunAt = Date.now();
   try {
-    var r = await Promise.all([FBAPI.hwTasks(), FBAPI.hwAllSubs(), FBAPI.hwAllFeedback()]);
+    var r = await Promise.all([
+      hwCache && !force ? Promise.resolve(hwCache) : FBAPI.hwTasks(),
+      hwSubsLive ? Promise.resolve(hwSubsLive) : FBAPI.hwAllSubs(),
+      hwFbLive ? Promise.resolve(hwFbLive) : FBAPI.hwAllFeedback()
+    ]);
     var data = { tasks: r[0], subs: {}, fb: {}, tests: DB.get(K.T), done: {} };
     r[1].forEach(function(s) { data.subs[s.taskId + '_' + s.studentId] = s; });
     r[2].forEach(function(f) { data.fb[f.taskId + '_' + f.studentId] = f; });
@@ -15135,7 +15165,9 @@ var stuLockTick = 0;
 setInterval(function() {
   if (cloud.role !== 'student' || !currentUser || examState || document.hidden) return;
   stuLockTick++;
-  if (!hwCache || stuLockTick % 10 === 0) loadHw(true); else checkStudentMissLock();
+  // 💰 the homework list is read again only once an hour (a new / changed homework arrives at once anyway: the
+  // teacher's save sends "hwVer" through the live settings)
+  if (!hwCache || stuLockTick % 60 === 0) loadHw(true); else checkStudentMissLock();
   // 📝 an exam that opened just now: the red number on "Tests" appears without a reload
   try { var u0 = currentUser; navBadge('nav-test-badge', sdAssignedTests(u0, u0.studentClass || u0.batch || 'Class 12').filter(function(t) { var k = studentExamStatus(t).key; return k === 'live' || k === 'open'; }).length); } catch (e) {}
 }, 60000);
@@ -19203,9 +19235,17 @@ async function fileDelete(coll, id) {
   try { await deleteDoc(doc(db, coll, docId(id))); } catch (e) {}
 }
 
+// a big list that is read only when first needed (teacher): started here, once per session
+let hwFbUnsub = null;
+function ensureColl(name) {
+  if (!adminMode) return;
+  if (name === "questions" && !watchedColls.has("questions")) watchQuery("questions", collection(db, "questions"));
+}
 async function pushCollection(name, arr) {
   // the teacher's list has not arrived yet: what the page holds is incomplete, so it must not be saved
-  if (adminMode && watchedColls.has(name) && !docs[name]) {
+  // (the Question Bank also before it was ever asked for — saving then would rewrite it from an empty list)
+  if (adminMode && (watchedColls.has(name) || name === "questions") && !docs[name]) {
+    if (name === "questions") ensureColl(name);
     if (window.showToast) window.showToast('⏳ Your data is still loading — please try that again in a moment.', 'error');
     return;
   }
@@ -19356,7 +19396,9 @@ function startAdminListeners() {
   // the screen opens after the light data; the big ones (questions, results, gallery photos) come in just after
   adminMode = true;
   firstPending = new Set(["users", "fees", "alerts", "tests", "settings/config", "settings/payment", "settings/about", "settings/aikey", "settings/drivekey"]);
-  ["users", "fees", "alerts", "questions", "tests", "submissions", "gallery"].forEach(function (n) {
+  // 💰 the Question Bank (the biggest list) is NOT read at every opening — only the first time a page needs it
+  // (ensureColl). That saves thousands of the free 50 000 daily reads.
+  ["users", "fees", "alerts", "tests", "submissions", "gallery"].forEach(function (n) {
     watchQuery(n, collection(db, n));
   });
   watchSetting("config");
@@ -19893,6 +19935,18 @@ window.FBAPI = {
   logout: function () { return signOut(auth); },
   watchGallery: watchGallery,
   pushCollection: pushCollection,
+  ensureColl: ensureColl,
+  // 🔒 the teacher's miss check: every feedback record (small fields only), LIVE — read once per session, then only
+  // the changes (it was read again in full every 10 minutes before)
+  watchHwFeedback: function (cb) {
+    if (hwFbUnsub || !adminMode) return;
+    hwFbUnsub = onSnapshot(collection(db, "hwfeedback"), function (snap) {
+      const out = [];
+      snap.forEach(function (d) { const x = d.data(); out.push({ taskId: x.taskId, studentId: x.studentId, status: x.status, resubmit: !!x.resubmit, checkedAt: x.checkedAt }); });
+      cb(out);
+    }, function (err) { report(err, "hwfeedback"); });
+    unsubs.push(function () { if (hwFbUnsub) { hwFbUnsub(); hwFbUnsub = null; } });
+  },
   // 🔔 this phone's "address" for notifications that come even when the app is closed (Firebase Cloud Messaging)
   pushToken: async function (vapidKey) {
     const m = await import("https://www.gstatic.com/firebasejs/13.1.0/firebase-messaging.js");

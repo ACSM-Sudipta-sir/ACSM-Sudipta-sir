@@ -3532,7 +3532,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261125233729';
+var APP_BUILD = '20261126001547';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -4283,6 +4283,7 @@ function renderAdminDashContent() {
         '<button type="button" onclick="switchAdminTab(\'qbank\')" class="btn btn-purple">📁 Open Classes &amp; Folders</button>' +
         '<button type="button" onclick="openExamBuilderModal(null)" class="btn btn-red">🎲 Create Exam (Marks / Timer / AI)</button>' +
         '<button type="button" onclick="switchAdminTab(\'students\'); openStudentAdmissionModal(null);" class="btn btn-green">🎓 + New Student Admission</button>' +
+        '<button type="button" onclick="openWaCenter()" class="btn btn-teal">📲 WhatsApp to guardians (results • missed work)</button>' +
       '</div>' +
     '</div>' +
 
@@ -10848,6 +10849,199 @@ function whatsappFeeLink(fee, number) {
   return 'https://wa.me/' + formatWA(number) + '?text=' + encodeURIComponent(msg);
 }
 
+// ================= 📲 WHATSAPP TO GUARDIANS — one list, one tap per family =================
+// WhatsApp lets a normal number send only one chat at a time (full automatic sending needs the paid WhatsApp
+// Business API). So: everybody of a class in ONE list with their own message ready; "▶ Send next" opens the next
+// chat with the message written — press Send in WhatsApp, come back, tap again. Private students are kept apart.
+function isPrivateStu(u) { return /private/i.test([u.batchNo, u.studentClass, u.batch, u.batchTime].join(' ')); }
+function waNumOf(u, to) {
+  var g = cleanPhone(u.guardianWhatsapp || u.guardianPhone || ''), s = cleanPhone(u.whatsapp || u.id);
+  return to === 's' ? s : (g || s);
+}
+var waQ = null;   // { title, key, items: [{ u, msg, tag }], to: 'g'|'s', cls: 'ALL', tag: 'ALL', note: '', sent: {} }
+function waSign() { return '\n\n— Sudipta Sir, A Complete Solution of Mathematics\n' + location.origin + location.pathname; }
+function waOpen(title, items, opts) {
+  opts = opts || {};
+  var key = 'acsm_wa_' + (opts.key || title);
+  var sent = {}; try { var o = JSON.parse(sessionStorage.getItem(key) || '{}'); if (o && o.at && Date.now() - o.at < 12 * 3600000) sent = o.sent || {}; } catch (e) {}
+  waQ = { title: title, key: key, items: items, to: opts.to || 'g', cls: 'ALL', tag: opts.tag || 'ALL', note: '', sent: sent, tags: opts.tags || null };
+  waRender();
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+}
+function waSaveSent() { try { sessionStorage.setItem(waQ.key, JSON.stringify({ at: Date.now(), sent: waQ.sent })); } catch (e) {} }
+function waList(priv) {
+  return waQ.items.filter(function(it) {
+    var c = it.u.studentClass || it.u.batch || '';
+    return isPrivateStu(it.u) === priv && (waQ.cls === 'ALL' || c === waQ.cls) && (waQ.tag === 'ALL' || it.tag === waQ.tag);
+  });
+}
+function waMsgOf(it) { return it.msg + (waQ.note.trim() ? '\n\n📌 ' + waQ.note.trim() : '') + waSign(); }
+function waLinkOf(it) { var n = waNumOf(it.u, waQ.to); return n ? 'https://wa.me/' + formatWA(n) + '?text=' + encodeURIComponent(waMsgOf(it)) : ''; }
+function waRender() {
+  var q = waQ, classes = [];
+  q.items.forEach(function(it) { var c = it.u.studentClass || it.u.batch || ''; if (c && classes.indexOf(c) === -1) classes.push(c); });
+  classes.sort();
+  var batch = waList(false), priv = waList(true);
+  var left = batch.filter(function(it) { return !q.sent[it.u.id] && waNumOf(it.u, q.to); });
+  var row = function(it) {
+    var n = waNumOf(it.u, q.to), done = !!q.sent[it.u.id];
+    return '<div style="display:flex; gap:8px; align-items:center; padding:7px 8px; border-bottom:1px solid #1e293b; font-size:0.84rem;' + (done ? ' opacity:0.55;' : '') + '">' +
+      '<div style="flex:1; min-width:0;"><b>' + esc(it.u.fullName || it.u.id) + '</b> <span style="color:var(--text-muted);">' + esc(it.u.studentClass || it.u.batch || '') + '</span>' +
+        (it.badge ? ' ' + it.badge : '') +
+        '<div style="font-size:0.74rem; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + (n ? '📞 ' + esc(n) + ' — ' : '<span style="color:#fca5a5;">no number</span> — ') + esc(it.msg.replace(/\n+/g, ' ').slice(0, 90)) + '</div></div>' +
+      (n ? '<a class="btn ' + (done ? 'btn-slate' : 'btn-green') + ' btn-xs" style="color:#fff; flex-shrink:0;" target="_blank" rel="noopener" href="' + escA(waLinkOf(it)) + '" onclick="waMark(\'' + escA(it.u.id) + '\')">' + (done ? '✓ Sent' : '💬 Send') + '</a>' : '') +
+    '</div>';
+  };
+  var tagSel = q.tags ? '<select class="select" style="margin:0; max-width:200px;" onchange="waQ.tag=this.value; waRender()">' + [['ALL', 'Everyone']].concat(q.tags).map(function(t) { return '<option value="' + t[0] + '"' + (q.tag === t[0] ? ' selected' : '') + '>' + t[1] + ' (' + (t[0] === 'ALL' ? q.items.length : q.items.filter(function(it) { return it.tag === t[0]; }).length) + ')</option>'; }).join('') + '</select>' : '';
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><h3 style="margin:0;">📲 ' + esc(q.title) + '</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
+    '<p style="margin:0 0 8px 0; font-size:0.78rem; color:var(--text-muted);">Every family gets its <b>own</b> message. Tap <b>▶ Send next</b> → WhatsApp opens with the message written → press <b>Send</b> there → come back → tap again. (WhatsApp does not allow a normal number to send to everyone by itself.)</p>' +
+    '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">' +
+      '<select class="select" style="margin:0; max-width:170px;" onchange="waQ.cls=this.value; waRender()"><option value="ALL">All classes</option>' + classes.map(function(c) { return '<option value="' + escA(c) + '"' + (q.cls === c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select>' +
+      tagSel +
+      '<select class="select" style="margin:0; max-width:190px;" onchange="waQ.to=this.value; waRender()"><option value="g"' + (q.to === 'g' ? ' selected' : '') + '>To: Guardian (else student)</option><option value="s"' + (q.to === 's' ? ' selected' : '') + '>To: Student</option></select>' +
+    '</div>' +
+    '<input type="text" class="input" style="margin:0 0 8px 0;" placeholder="📌 Add a line of your own to every message (optional)" value="' + escA(q.note) + '" oninput="waQ.note=this.value;" onchange="waRender()">' +
+    '<button type="button" class="btn btn-green btn-block" style="margin-bottom:6px; font-size:1.02rem;"' + (left.length ? '' : ' disabled') + ' onclick="waNext()">' + (left.length ? '▶ Send next (' + (batch.length - left.length + 1) + ' of ' + batch.length + ')' : '✅ All sent in this list') + '</button>' +
+    '<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;"><button type="button" class="btn btn-slate btn-xs" onclick="waQ.sent={}; waSaveSent(); waRender()">↺ Start again</button>' +
+      '<button type="button" class="btn btn-slate btn-xs" onclick="waCopyAll()">📋 Copy all messages</button></div>' +
+    '<div style="font-weight:800; margin:6px 0 2px;">👥 Batch students (' + batch.length + ')</div>' +
+    '<div style="max-height:34vh; overflow:auto; border:1px solid #1e293b; border-radius:10px;">' + (batch.map(row).join('') || '<p style="padding:10px; margin:0; color:var(--text-muted);">Nobody here.</p>') + '</div>' +
+    (priv.length ? '<div style="font-weight:800; margin:10px 0 2px; color:#fcd34d;">🔒 Private students (' + priv.length + ') — sent one by one, separately</div>' +
+      '<div style="max-height:24vh; overflow:auto; border:1px solid #78350f; border-radius:10px;">' + priv.map(row).join('') + '</div>' : '');
+}
+function waMark(id) { waQ.sent[id] = Date.now(); waSaveSent(); setTimeout(waRender, 400); }
+function waNext() {
+  var it = waList(false).find(function(x) { return !waQ.sent[x.u.id] && waNumOf(x.u, waQ.to); });
+  if (!it) return;
+  waMark(it.u.id);
+  window.open(waLinkOf(it), '_blank', 'noopener');
+}
+function waCopyAll() {
+  var all = waList(false).concat(waList(true)).map(function(it) { return '— ' + (it.u.fullName || '') + ' (' + (waNumOf(it.u, waQ.to) || 'no number') + ')\n' + waMsgOf(it); }).join('\n\n');
+  copyTextSafe(all, '📋 All messages copied.');
+}
+
+// 📝 the results of one exam → every family (took it: marks + rank • did not take it: a warning)
+function waExamResults(tid) {
+  var t = DB.get(K.T).find(function(x) { return x.id === tid; });
+  if (!t) return;
+  var subs = DB.get(K.S).filter(function(s) { return s.testId === tid; });
+  var ranked = subs.slice().sort(function(a, b) { return Number(b.score || 0) - Number(a.score || 0); });
+  var over = t.endAtMs && Date.now() > t.endAtMs;
+  var items = DB.get(K.U).filter(isActiveStu).filter(function(u) { return sdAssignedTests(u, u.studentClass || u.batch || 'Class 12').some(function(x) { return x.id === tid; }); }).map(function(u) {
+    var s = subs.find(function(x) { return x.studentId === u.id; });
+    var head = 'Dear Guardian,\n📝 *' + (t.title || 'Online exam') + '*' + (t.startAtMs ? ' (' + fmtDateShort(localDateStr(new Date(t.startAtMs))) + ')' : '') + '\n👤 ' + (u.fullName || '') + '\n';
+    if (s) {
+      var pend = (s.evaluations || []).some(function(e) { return e.pending; });
+      if (pend && isPaperExam(t)) return { u: u, tag: 'done', badge: '<span class="badge badge-medium">checking</span>', msg: head + '📤 The answer sheet is submitted — marks will come after checking.' };
+      var pct = s.maxScore > 0 ? Math.round(s.score / s.maxScore * 100) : 0;
+      var rk = ranked.findIndex(function(x) { return x.id === s.id; }) + 1;
+      return { u: u, tag: 'done', badge: '<span class="badge badge-easy">' + s.score + '/' + s.maxScore + '</span>', msg: head + '✅ Marks: *' + s.score + ' / ' + s.maxScore + '* (' + pct + '%)' + (rk ? '\n🏆 Rank: ' + rk + ' of ' + ranked.length : '') + (pct >= 80 ? '\n🌟 Very good — keep it up!' : (pct < 40 ? '\n📘 Needs more practice — please make sure your ward revises this chapter.' : '')) };
+    }
+    return { u: u, tag: 'missed', badge: '<span class="badge badge-hard">' + (over ? 'missed' : 'not yet') + '</span>', msg: head + (over ? '❌ Your ward did *NOT* take this online exam. Every exam counts — please make sure the next one is taken.' : '⏳ Your ward has not taken this online exam yet.' + (t.endAtMs ? ' It closes ' + fmtDateTime(t.endAtMs) + '.' : '')) };
+  });
+  waOpen('Results — ' + (t.title || 'exam'), items, { key: 'ex_' + tid, tags: [['done', '✅ Took it'], ['missed', '❌ Did not take it']] });
+}
+// 📒 one homework → every family (checked: %, grade • submitted • NOT submitted)
+function waHwReport() {
+  var d = hwDetail; if (!d || !d.task) return;
+  var t = d.task, k = HW_KINDS[hwKind(t)] || { title: 'Homework' }, over = hwOverdue(t);
+  var items = hwStudentsOf(t).map(function(u) {
+    var s = d.subs[u.id], f = d.fb[u.id];
+    var head = 'Dear Guardian,\n📒 *' + k.title + ': ' + (t.title || '') + '*\n👤 ' + (u.fullName || '') + '\n';
+    if (f && f.status === 'checked') {
+      var p = hwPct(f, t), g = hwGrade(p);
+      return { u: u, tag: 'done', badge: '<span class="badge badge-easy">' + (p !== null ? p + '%' : 'checked') + '</span>', msg: head + '✅ Checked' + (p !== null ? ': *' + p + '%* done correctly' : '') + (g ? ' — ' + g.label.replace(/^\S+\s/, '') : '') + (f.marks !== null && f.marks !== undefined && f.maxMarks ? '\n📊 Marks: ' + f.marks + ' / ' + f.maxMarks : '') + (f.resubmit && !(s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0)) ? '\n🔁 Some answers must be corrected and submitted again — the hints are in the app.' : '') };
+    }
+    if (s) return { u: u, tag: 'done', badge: '<span class="badge badge-medium">submitted</span>', msg: head + '📤 Submitted on ' + fmtDateTime(s.uploadedAt) + (s.late ? ' (late)' : '') + ' — being checked.' };
+    return { u: u, tag: 'missed', badge: '<span class="badge badge-hard">' + (over ? 'not submitted' : 'pending') + '</span>', msg: head + (over ? '❌ *NOT submitted.* It was due ' + fmtDateTime(t.dueAtMs) + '. Please make sure it is done and uploaded now.' : '⏳ Not submitted yet' + (t.dueAtMs ? ' — due ' + fmtDateTime(t.dueAtMs) : '') + '.') };
+  });
+  waOpen(k.title + ' — ' + (t.title || ''), items, { key: 'hw_' + t.id, tags: [['done', '✅ Submitted'], ['missed', '❌ Not submitted']] });
+}
+// ⚠️ everybody who MISSED work in the last N days (online exams not taken + homework not submitted), in one list
+async function waMissedAll(days) {
+  days = days || 30;
+  var since = Date.now() - days * 86400000;
+  showToast('⏳ Finding the missed work…');
+  var tasks = hwCache;
+  if (!tasks) { try { tasks = await FBAPI.hwTasks(); } catch (e) { tasks = []; } }
+  var hsubs = hwSubsLive || [];
+  var subs = DB.get(K.S);
+  var items = [];
+  DB.get(K.U).filter(isActiveStu).forEach(function(u) {
+    var miss = [];
+    sdAssignedTests(u, u.studentClass || u.batch || 'Class 12').forEach(function(t) {
+      if (!t.endAtMs || t.endAtMs > Date.now() || t.endAtMs < since) return;
+      if (isJeeFolder(t.targetBatch) && stuJee(u).indexOf(t.targetBatch) === -1) return;
+      if (!subs.some(function(s) { return s.testId === t.id && s.studentId === u.id; })) miss.push('📝 Online exam: ' + (t.title || '') + ' (' + fmtDateShort(localDateStr(new Date(t.endAtMs))) + ')');
+    });
+    (tasks || []).forEach(function(t) {
+      if (!t.dueAtMs || t.dueAtMs > Date.now() || t.dueAtMs < since || !hwIsForStudent(t, u)) return;
+      if (!hsubs.some(function(s) { return s.taskId === t.id && s.studentId === u.id; })) miss.push('📒 ' + ((HW_KINDS[hwKind(t)] || {}).title || 'Homework') + ': ' + (t.title || '') + ' (due ' + fmtDateShort(localDateStr(new Date(t.dueAtMs))) + ')');
+    });
+    if (!miss.length) return;
+    items.push({ u: u, tag: 'missed', badge: '<span class="badge badge-hard">' + miss.length + ' missed</span>',
+      msg: 'Dear Guardian,\n⚠️ *' + (u.fullName || '') + '* has missed this work in the last ' + days + ' days:\n' + miss.map(function(m) { return '• ' + m; }).join('\n') + '\n\nPlease make sure your ward submits the homework and takes every online exam' + (missCfg().on ? ' — otherwise the student login gets locked' : '') + '.' });
+  });
+  if (!items.length) { showToast('✅ Nobody missed any exam or homework in the last ' + days + ' days.', 'success'); return; }
+  if (!hwSubsLive) showToast('Note: the homework list is still loading — open 📒 Homework once for a complete list.', 'error');
+  waOpen('Missed work — last ' + days + ' days', items, { key: 'missed_' + days });
+}
+// 📢 your own message to a whole class (each family gets it personally, with the student's name)
+function waCustom() {
+  var txt = prompt('Your message (each guardian gets it with their ward\'s name on top):', '');
+  if (!txt || !txt.trim()) return;
+  var items = DB.get(K.U).filter(isActiveStu).map(function(u) { return { u: u, tag: 'all', msg: 'Dear Guardian of *' + (u.fullName || '') + '*,\n' + txt.trim() }; });
+  waOpen('Message to guardians', items, { key: 'custom_' + Date.now() });
+}
+// 📣 an announcement for a WhatsApp GROUP: copy it, or share it straight into the group
+function waShareText(title, text) {
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><h3 style="margin:0;">📣 ' + esc(title) + '</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
+    '<p style="margin:0 0 6px 0; font-size:0.8rem; color:var(--text-muted);">Change the text if you like, then share it into your class WhatsApp group (WhatsApp asks which chat / group).</p>' +
+    '<textarea id="wa-share-txt" class="textarea" rows="10">' + escT(text) + '</textarea>' +
+    '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">' +
+      '<button type="button" class="btn btn-green" onclick="window.open(\'https://wa.me/?text=\' + encodeURIComponent(document.getElementById(\'wa-share-txt\').value), \'_blank\', \'noopener\')">💬 Share on WhatsApp</button>' +
+      '<button type="button" class="btn btn-teal" onclick="copyTextSafe(document.getElementById(\'wa-share-txt\').value, \'📋 Copied — paste it in the group.\')">📋 Copy</button>' +
+      (navigator.share ? '<button type="button" class="btn btn-slate" onclick="navigator.share({ text: document.getElementById(\'wa-share-txt\').value }).catch(function(){})">📤 Share…</button>' : '') +
+    '</div>';
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+}
+function waShareExam(tid) {
+  var t = DB.get(K.T).find(function(x) { return x.id === tid; });
+  if (!t) return;
+  var n = Math.min((t.questions || []).length, Number(t.questionsPerStudent || (t.questions || []).length));
+  waShareText('Exam announcement', '📢 *ONLINE EXAM* — ' + (t.title || '') + '\n' +
+    '📚 Class: ' + (t.targetBatch === 'ALL' ? 'All' : (t.targetBatch || '')) + (t.board ? ' (' + t.board + ')' : '') + '\n' +
+    (t.startAtMs ? '🟢 Opens: *' + fmtDateTime(t.startAtMs) + '*\n' : '') + (t.endAtMs ? '🔴 Closes: *' + fmtDateTime(t.endAtMs) + '*\n' : '') +
+    '⏱ Time: ' + Number(t.duration || 0) + ' min • ' + n + ' questions' + (isPaperExam(t) ? ' • write in your notebook, then upload the pages' : '') + '\n' +
+    (t.chapters && t.chapters.length ? '📖 Chapters: ' + t.chapters.join(', ') + '\n' : '') +
+    '\n👉 Open the ACSM app → *Tests* → ▶ START EXAM\nOnly ONE attempt. Missing an exam counts against you.' + waSign());
+}
+function waShareHw() {
+  var d = hwDetail; if (!d || !d.task) return;
+  var t = d.task, k = HW_KINDS[hwKind(t)] || { title: 'Homework' };
+  waShareText(k.title + ' announcement', '📒 *' + k.title.toUpperCase() + '* — ' + (t.title || '') + '\n' +
+    (t.openAtMs ? '🟢 Upload opens: ' + fmtDateTime(t.openAtMs) + '\n' : '') + (t.dueAtMs ? '🔴 Submit by: *' + fmtDateTime(t.dueAtMs) + '*\n' : '') +
+    (t.instructions ? '\n' + plainText(t.instructions).slice(0, 600) + '\n' : '') +
+    '\n👉 Do it in your notebook, then upload ONE PDF in the ACSM app → *Homework*.' + (missCfg().on ? '\n⚠️ Not submitting can lock your login.' : '') + waSign());
+}
+// the teacher's WhatsApp centre (dashboard)
+function openWaCenter() {
+  var tests = DB.get(K.T).slice().sort(function(a, b) { return Number(b.endAtMs || b.createdAt || 0) - Number(a.endAtMs || a.createdAt || 0); }).slice(0, 12);
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h3 style="margin:0;">📲 WhatsApp to guardians</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
+    '<div style="display:grid; gap:8px;">' +
+      '<button type="button" class="btn btn-red" onclick="waMissedAll(30)">⚠️ Missed work alert (exams not taken + homework not submitted, last 30 days)</button>' +
+      '<button type="button" class="btn btn-purple" onclick="waCustom()">📢 My own message to all guardians</button>' +
+      '<div style="font-weight:800; margin-top:6px;">📝 Results of an exam:</div>' +
+      tests.map(function(t) { return '<div style="display:flex; gap:6px;"><button type="button" class="btn btn-slate btn-sm" style="flex:1; text-align:left;" onclick="waExamResults(\'' + escA(t.id) + '\')">📊 ' + esc(t.title || '') + ' <span style="color:var(--text-muted);">' + esc(t.targetBatch || '') + '</span></button><button type="button" class="btn btn-teal btn-sm" title="Announce in a WhatsApp group" onclick="waShareExam(\'' + escA(t.id) + '\')">📣</button></div>'; }).join('') +
+      '<div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">📒 For a homework: open it in <b>Homework</b> → <b>📲 Report to guardians</b> / <b>📣 Share to group</b>.<br>🔔 Exams and homework also reach the students\' phones as notifications (app closed too) once <b>🔔 Phone notifications</b> is set up: ' + (pushReady() ? '<b style="color:#86efac;">✅ set up</b>' : '<a href="#" style="color:#fcd34d;" onclick="openPushSetup(); return false;">⚠️ not set up — set it up</a>') + '.</div>' +
+    '</div>';
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+}
+
 function openPaymentSavedModal(feeId) {
   var fee = DB.get(K.FEES).find(function(f) { return f.id === feeId; });
   if (!fee) return closeModal();
@@ -13513,6 +13707,8 @@ function renderAdminTestsContent() {
         '<button type="button" onclick="testQuestionsPdf(\'' + escA(t.id) + '\', false)" class="btn btn-slate btn-sm">📄 PDF</button>' +
         (function() { var bad = (t.questions || []).filter(function(q) { return keyCheck(q); }).length; return bad ? '<button type="button" onclick="openKeyFixAll()" class="btn btn-amber btn-sm blink-live">⚠️ ' + bad + ' answer key(s) wrong? Fix</button>' : ''; })() +
         '<button type="button" onclick="markExamSeen(\'' + escA(t.id) + '\'); resultsTestFilter=\'' + escA(t.id) + '\'; switchAdminTab(\'results\')" class="btn btn-teal btn-sm">📊 Results' + (nNew ? ' (🔴 ' + nNew + ' new)' : '') + '</button>' +
+        '<button type="button" onclick="waExamResults(\'' + escA(t.id) + '\')" class="btn btn-green btn-sm" title="Each guardian gets the marks / a missed-exam warning on WhatsApp">📲 Results → guardians</button>' +
+        '<button type="button" onclick="waShareExam(\'' + escA(t.id) + '\')" class="btn btn-teal btn-sm" title="An announcement for your class WhatsApp group">📣 Share to group</button>' +
         '<button type="button" onclick="deleteTest(\'' + escA(t.id) + '\')" class="btn btn-red btn-sm">🗑️ Delete</button>' +
       '</div></div>';
   };
@@ -15338,6 +15534,8 @@ function renderHwDetail() {
           '<button type="button" class="btn btn-green btn-sm" onclick="openHwPasteModal()">📥 Paste AI feedback (JSON)</button>' +
           (Object.keys(d.fb).length ? '<button type="button" class="btn btn-blue btn-sm" onclick="hwFeedbackPdf()">📄 Feedback PDF (all ' + Object.keys(d.fb).length + ')</button>' : '') +
           (hwOverdue(t) ? '<button type="button" class="btn btn-red btn-sm" onclick="hwRemarkMissing()">📝 Remark for not submitted</button>' : '') +
+          '<button type="button" class="btn btn-green btn-sm" onclick="waHwReport()" title="Each guardian gets this homework\'s result / a not-submitted warning on WhatsApp">📲 Report → guardians</button>' +
+          '<button type="button" class="btn btn-teal btn-sm" onclick="waShareHw()" title="An announcement for your class WhatsApp group">📣 Share to group</button>' +
         '</div>' +
         '<div id="hw-zip-status" style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;"></div>' +
       '</div>' +

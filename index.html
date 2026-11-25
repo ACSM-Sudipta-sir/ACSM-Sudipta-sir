@@ -3532,7 +3532,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261124185442';
+var APP_BUILD = '20261125232824';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -4241,13 +4241,13 @@ function renderAdminDashContent() {
         '<div style="font-size:0.74rem; color:#94a3b8;">Open Classes &amp; Folders</div>' +
       '</div>' +
       '<div class="card card-red" style="cursor:pointer; margin:0;" onclick="switchAdminTab(\'tests\')">' +
-        '<div style="font-size:0.8rem; color:var(--text-muted);">Exams &amp; AI Submissions</div>' +
+        '<div style="font-size:0.8rem; color:var(--text-muted);">Exams set / Answer sheets submitted</div>' +
         '<div style="font-size:1.9rem; font-weight:900; color:#f87171;">' + DB.get(K.T).length + ' / ' + DB.get(K.S).length + '</div>' +
-        '<div style="font-size:0.74rem; color:#94a3b8;">Timed • one attempt</div>' +
+        '<div style="font-size:0.74rem; color:#94a3b8;">' + DB.get(K.T).length + ' exams made • ' + DB.get(K.S).length + ' student papers in all</div>' +
       '</div>' +
       '<div class="card card-green" style="cursor:pointer; margin:0;" onclick="switchAdminTab(\'fees\')">' +
         '<div style="font-size:0.8rem; color:var(--text-muted);">Students &amp; Fees This Month</div>' +
-        '<div style="font-size:1.9rem; font-weight:900; color:#34d399;">' + stus.length + ' / ' + lockSpan(feeTotals().month) + '</div>' +
+        '<div style="font-size:1.9rem; font-weight:900; color:#34d399;">' + lockCount(stus.length) + ' / ' + lockSpan(feeTotals().month) + '</div>' +
         '<div style="font-size:0.74rem; color:#94a3b8;">All time: ' + lockSpan(feeTotals().all) + '</div>' +
       '</div>' +
     '</div>' +
@@ -8036,10 +8036,18 @@ function lockSpan(n) {
   return '<span class="amt-lock" title="Tap to show / hide" onclick="event.stopPropagation(); toggleFeeLock()">' + (feeUnlocked ? fmtINR(n) : '🔒 ••••') + '</span>';
 }
 
+// the number of students on the dashboard: hidden like the money (same PIN)
+function lockCount(n) {
+  return '<span class="amt-lock" title="Tap to show / hide" onclick="event.stopPropagation(); toggleFeeLock()">' + (feeUnlocked ? n : '🔒 ••') + '</span>';
+}
 function toggleFeeLock() {
-  // opening needs the 4-digit PIN (if one is set); closing never does
-  if (!feeUnlocked && lockPin() && pinState.mode !== 'unlock') { openPinPad('unlock', function() { pinState.mode = 'unlock'; toggleFeeLock(); pinState.mode = ''; }); return; }
-  if (!feeUnlocked && !lockPin() && !feeLockHinted) { feeLockHinted = true; showToast('Tip: set a 4-digit PIN (menu → 🔢 Lock PIN) so nobody else can open the totals.', 'success'); }
+  // opening ALWAYS needs the 4-digit PIN; with no PIN yet, the teacher first chooses one. Closing never does.
+  if (!feeUnlocked && !lockPin()) {
+    showToast('🔢 First choose your 4-digit PIN — then the student count and the money open only with it.', 'success');
+    openPinPad('set1', null, true);
+    return;
+  }
+  if (!feeUnlocked && pinState.mode !== 'unlock') { openPinPad('unlock', function() { pinState.mode = 'unlock'; toggleFeeLock(); pinState.mode = ''; }); return; }
   feeUnlocked = !feeUnlocked;
   clearTimeout(feeLockTimer);
   if (feeUnlocked) feeLockTimer = setTimeout(function() { feeUnlocked = false; refreshFeeViews(); }, 30000);
@@ -9736,7 +9744,7 @@ function pinDone() {
       closeModal();
       feeUnlocked = false;
       refreshFeeViews();
-      showToast('🔒 PIN saved. The money totals now open only with this PIN.', 'success');
+      showToast('🔒 PIN saved. The student count and the money totals now open only with this PIN (tap 🔒 •• to open; they close again after 30 s).', 'success');
     } else { s.mode = 'set1'; s.buf = ''; s.first = ''; renderPinPad('❌ The two PINs did not match — choose again'); }
   }
 }

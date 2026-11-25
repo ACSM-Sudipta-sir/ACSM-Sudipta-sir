@@ -646,6 +646,13 @@
     .rk-chip b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .rk-chip span { color: #fcd34d; font-weight: 800; }
     .rk-chip.on { background: linear-gradient(135deg, #a16207, #78350f); border-color: #eab308; }
+    /* the small rank card on an exam / homework card */
+    .rk-mini { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding: 9px 12px; border: 0; border-radius: 12px; color: #fff; font: inherit; font-size: 0.88rem; cursor: pointer; background: linear-gradient(135deg, #334155, #1e293b); box-shadow: 0 6px 16px rgba(0,0,0,0.35); }
+    .rk-mini small { display: block; font-size: 0.74rem; opacity: 0.85; margin-top: 1px; }
+    .rk-mini-m { font-size: 1.6rem; line-height: 1; }
+    .rk-mini.r1 { background: linear-gradient(135deg, #b45309, #f59e0b); }
+    .rk-mini.r2 { background: linear-gradient(135deg, #475569, #94a3b8); }
+    .rk-mini.r3 { background: linear-gradient(135deg, #7c2d12, #c2410c); }
     .rk-me { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 16px; margin-bottom: 14px; color: #fff; background: linear-gradient(135deg, #334155, #1e293b); box-shadow: 0 12px 28px rgba(0,0,0,0.4); }
     .rk-me.r1 { background: linear-gradient(135deg, #ca8a04, #854d0e); }
     .rk-me.r2 { background: linear-gradient(135deg, #64748b, #334155); }
@@ -3532,7 +3539,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261126001547';
+var APP_BUILD = '20261126003651';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -9321,6 +9328,54 @@ function openRankView(id) {
   document.getElementById('row-editor-modal').classList.remove('hidden');
 }
 
+// ---- 📒 homework rank lists: from the teacher's checked copies (% done correctly), class by class ----
+// saved like the exam lists (rankers/hw_<task>__<class>: short names, %, grade — no numbers); students see their class
+var hwRankKey = {};
+function hwPublishRank(d) {
+  d = d || hwDetail;
+  if (!d || !d.task || cloud.role !== 'admin' || !window.FBAPI || !FBAPI.rankSave || !rankAutoOn()) return;
+  var t = d.task, k = HW_KINDS[hwKind(t)] || { title: 'Homework' }, tid = 'hw_' + t.id, groups = {};
+  hwStudentsOf(t).forEach(function(u) { var g = u.studentClass || u.batch || 'Class 12'; (groups[g] = groups[g] || []).push(u); });
+  var save = [];
+  Object.keys(groups).forEach(function(g) {
+    var rows = [];
+    groups[g].forEach(function(u) { var f = d.fb[u.id]; if (!f || f.status !== 'checked') return; var p = hwPct(f, t); if (p === null) return; rows.push({ u: u, p: Math.round(p) }); });
+    if (!rows.length) return;
+    rows.sort(function(a, b) { return b.p - a.p || String(a.u.fullName).localeCompare(String(b.u.fullName)); });
+    rows.forEach(function(r, i) { r.r = (i && rows[i - 1].p === r.p) ? rows[i - 1].r : i + 1; });
+    var list = rows.map(function(r) { return { k: rankCode(r.u.id, tid), nm: shortName(r.u.fullName), r: r.r, s: r.p, m: 0, p: r.p, gr: (hwGrade(r.p) || {}).label || '' }; });
+    var id = rankDocId(tid, g), key = JSON.stringify(list) + groups[g].length;
+    if (hwRankKey[id] === key) return;
+    hwRankKey[id] = key;
+    save.push({ id: id, testId: tid, title: '📒 ' + k.title + ': ' + (t.title || ''), grp: g, kind: 'hw', examAt: t.dueAtMs || t.createdAt || 0,
+      of: groups[g].length, n: rows.length, avg: Math.round(avgOf(rows.map(function(r) { return r.p; }))), high: rows[0].p, list: list,
+      published: true, hidden: false, updatedAt: Date.now(), publishedAt: Date.now() });
+  });
+  if (save.length) FBAPI.rankSave(save).catch(function() { save.forEach(function(x) { delete hwRankKey[x.id]; }); });
+}
+// the student's own place in one list (exam id, or 'hw_<task>')
+function myRankIn(testId) {
+  if (!rankStuCache || !currentUser) return null;
+  var d = rankStuCache.find(function(x) { return x.testId === testId; });
+  if (!d) return null;
+  var me = (d.list || []).find(function(x) { return x.k === rankCode(currentUser.id, testId); });
+  return me ? { d: d, me: me } : { d: d, me: null };
+}
+// a small rank card on an exam / homework card — tap it for the full list (🏆 Ranker)
+function rankCardHtml(testId, waitText) {
+  if (cloud.role !== 'student' || !currentUser) return '';
+  loadStudentRanks(currentUser);
+  var r = myRankIn(testId);
+  if (!r) return waitText ? '<div style="margin-top:8px; padding:7px 10px; border-radius:10px; background:#0f172a; border:1px dashed #334155; font-size:0.8rem; color:var(--text-muted);">🏆 ' + waitText + '</div>' : '';
+  if (!r.me) return '';
+  var hw = r.d.kind === 'hw';
+  return '<button type="button" class="rk-mini r' + Math.min(r.me.r, 4) + '" onclick="rankOpen=\'' + escA(r.d.id) + '\'; setStudentTab(\'ranker\')">' +
+    '<span class="rk-mini-m">' + (medalOf(r.me.r) || '🎖️') + '</span>' +
+    '<span style="flex:1; text-align:left;"><b>Rank #' + r.me.r + '</b> of ' + r.d.n + ' in your class' +
+      '<small>' + (hw ? r.me.p + '% • ' + esc(r.me.gr || ((hwGrade(r.me.p) || {}).label || '')) : r.me.s + ' / ' + r.me.m + ' • ' + Math.round(r.me.p) + '%') + ' • class average ' + pctTxt(r.d.avg) + '</small></span>' +
+    '<span style="font-size:0.78rem; opacity:0.85;">Rank card ›</span></button>';
+}
+
 // ---- student page: 🏆 Ranker ----
 var rankStuCache = null, rankStuAt = 0, rankStuBusy = false;
 function loadStudentRanks(u, force) {
@@ -9331,7 +9386,7 @@ function loadStudentRanks(u, force) {
     .catch(function() { if (!rankStuCache) rankStuCache = []; })
     .then(function() {
       rankStuBusy = false; rankStuAt = Date.now();
-      if (!examState && studentTab === 'ranker' && document.getElementById('view-student-dash').classList.contains('active')) renderStudentDashContent(true);
+      if (!examState && ['ranker', 'tests', 'completed', 'hw', 'examalert'].indexOf(studentTab) !== -1 && document.getElementById('view-student-dash').classList.contains('active')) renderStudentDashContent(true);
     });
 }
 function studentRankerHtml(u) {
@@ -9343,16 +9398,16 @@ function studentRankerHtml(u) {
   if (!rankOpen || !list.some(function(d) { return d.id === rankOpen; })) rankOpen = list[0].id;
   var chips = '<div class="rk-chips">' + list.map(function(d) {
     var me = (d.list || []).find(function(x) { return x.k === rankCode(u.id, d.testId); });
-    return '<button type="button" class="rk-chip' + (d.id === rankOpen ? ' on' : '') + '" onclick="rankOpen=\'' + escA(d.id) + '\'; renderStudentDashContent();"><b>' + esc(d.title) + '</b><span>' + (me ? medalOf(me.r) + ' #' + me.r + ' of ' + d.n : 'not taken') + '</span></button>';
+    return '<button type="button" class="rk-chip' + (d.id === rankOpen ? ' on' : '') + '" onclick="rankOpen=\'' + escA(d.id) + '\'; renderStudentDashContent();"><b>' + esc(d.title) + '</b><span>' + (me ? medalOf(me.r) + ' #' + me.r + ' of ' + d.n : (d.kind === 'hw' ? 'not in list' : 'not taken')) + '</span></button>';
   }).join('') + '</div>';
   var d = list.find(function(x) { return x.id === rankOpen; });
   var myK = rankCode(u.id, d.testId);
   var me = (d.list || []).find(function(x) { return x.k === myK; });
   var card = me
-    ? '<div class="rk-me r' + Math.min(me.r, 4) + '"><div class="rk-medal">' + (medalOf(me.r) || '🎖️') + '</div><div><div class="rk-big">Rank #' + me.r + ' <small>of ' + d.n + '</small></div><div class="rk-sub">' + me.s + ' / ' + me.m + ' marks • ' + Math.round(me.p) + '% • class average ' + pctTxt(d.avg) + '</div></div></div>'
-    : '<div class="card"><p style="margin:0; color:var(--text-muted);">You did not take this exam.</p></div>';
+    ? '<div class="rk-me r' + Math.min(me.r, 4) + '"><div class="rk-medal">' + (medalOf(me.r) || '🎖️') + '</div><div><div class="rk-big">Rank #' + me.r + ' <small>of ' + d.n + '</small></div><div class="rk-sub">' + (d.kind === 'hw' ? Math.round(me.p) + '% done correctly • ' + esc(me.gr || ((hwGrade(me.p) || {}).label || '')) : me.s + ' / ' + me.m + ' marks • ' + Math.round(me.p) + '%') + ' • class average ' + pctTxt(d.avg) + '</div></div></div>'
+    : '<div class="card"><p style="margin:0; color:var(--text-muted);">' + (d.kind === 'hw' ? 'Your copy of this homework is not in the list (not submitted / not checked yet).' : 'You did not take this exam.') + '</p></div>';
   var rows = (d.list || []).map(function(x) {
-    return '<div class="rk-row' + (x.k === myK ? ' me' : '') + '"><span class="rk-r">' + (medalOf(x.r) || '#' + x.r) + '</span><span class="rk-nm">' + esc(x.nm) + (x.k === myK ? ' <b>(you)</b>' : '') + '</span><span class="rk-s">' + x.s + ' / ' + x.m + '</span><span class="rk-p">' + Math.round(x.p) + '%</span></div>';
+    return '<div class="rk-row' + (x.k === myK ? ' me' : '') + '"><span class="rk-r">' + (medalOf(x.r) || '#' + x.r) + '</span><span class="rk-nm">' + esc(x.nm) + (x.k === myK ? ' <b>(you)</b>' : '') + '</span><span class="rk-s">' + (d.kind === 'hw' ? esc(String(x.gr || ((hwGrade(x.p) || {}).label || '')).replace(/^\S+\s/, '')) : x.s + ' / ' + x.m) + '</span><span class="rk-p">' + Math.round(x.p) + '%</span></div>';
   }).join('');
   return head + chips +
     '<div class="rank-secure" oncontextmenu="return false" ondragstart="return false">' +
@@ -13788,7 +13843,9 @@ function studentExamCardHtml(t) {
     action =
       '<div style="margin-bottom:10px; padding:8px 12px; background:rgba(5,150,105,0.2); border:1px solid #059669; border-radius:8px; font-size:0.84rem; color:#6ee7b7;">✅ Submitted' +
         (isPaperExam(t) && pend && !sub.sheetReport ? ' — <span style="color:#fcd34d;">marks after the teacher checks your answer sheet</span>' : ' — Score: <b>' + sub.score + ' / ' + sub.maxScore + '</b>' + (pend ? ' <span style="color:#fcd34d;">(written part will be reviewed)</span>' : '')) + '</div>' +
-      '<button type="button" onclick="viewSubmissionDetail(\'' + escA(sub.id) + '\')" class="btn ' + (paperUpload ? 'btn-purple' : 'btn-teal') + ' btn-block">' + (paperUpload ? '📤 Upload Answer Sheet / Solutions' : '📊 View Result &amp; Solutions') + '</button>';
+      '<button type="button" onclick="viewSubmissionDetail(\'' + escA(sub.id) + '\')" class="btn ' + (paperUpload ? 'btn-purple' : 'btn-teal') + ' btn-block">' + (paperUpload ? '📤 Upload Answer Sheet / Solutions' : '📊 View Result &amp; Solutions') + '</button>' +
+      // 🏆 the rank card of this exam (after the exam is over for the class)
+      rankCardHtml(t.id, (t.endAtMs && Date.now() < t.endAtMs) ? 'Your rank card comes when the exam time is over (' + fmtDateTime(t.endAtMs) + ').' : (pend ? 'Your rank card comes after the answer sheets are checked.' : 'Your rank card is being prepared — look again in a little while.'));
   } else if (s.key === 'live' || s.key === 'open') {
     action = '<button type="button" data-tap="start" data-id="' + escA(t.id) + '" class="tap-btn red">▶ START EXAM</button>' +
       '<div style="font-size:0.74rem; color:var(--text-muted); margin-top:6px; text-align:center;">One attempt only' + (t.endAtMs ? ' • window closes in ' + minsLeftText(t.endAtMs - Date.now()) : '') + '</div>';
@@ -14748,12 +14805,13 @@ function hwPct(f, t) {
   }
   return null;
 }
-// 100% = Excellent • 70% and above = Good • below 70% = Average (with hints, and redo)
+// the teacher's rule: 90%+ = Excellent • 80%+ = Good • 50%+ = Average • below 50% = Needs improvement
 function hwGrade(p) {
   if (p === null || p === undefined) return null;
-  if (p >= 100) return { key: 'excellent', label: '🌟 Excellent', color: '#16a34a' };
-  if (p >= 70) return { key: 'good', label: '👍 Good', color: '#2563eb' };
-  return { key: 'average', label: '📘 Average', color: '#d97706' };
+  if (p >= 90) return { key: 'excellent', label: '🌟 Excellent', color: '#16a34a' };
+  if (p >= 80) return { key: 'good', label: '👍 Good', color: '#2563eb' };
+  if (p >= 50) return { key: 'average', label: '📘 Average', color: '#d97706' };
+  return { key: 'weak', label: '⚠️ Needs improvement', color: '#dc2626' };
 }
 function hwGradeBadge(f, t) {
   var p = hwPct(f, t), g = hwGrade(p);
@@ -15445,6 +15503,7 @@ async function reloadHwDetail(selectNew) {
   } catch (e) { showToast('Could not load the submissions: ' + ((e && e.code) || 'error'), 'error'); }
   hwDetail.loading = false;
   if (currentAdminTab === 'hw') renderHwDetail();
+  try { hwPublishRank(hwDetail); } catch (e) {}     // 🏆 the class rank list of this homework (students see it)
   // 📄 checked copies whose marked pages (E1, E2 …) are not ready for the student yet: made now in the background
   var t = hwDetail.task, todo = [];
   Object.keys(hwDetail.fb).forEach(function(p) {
@@ -16877,7 +16936,7 @@ function openHwFeedbackModal(phone) {
     (d.subs[phone] ? '<button type="button" class="btn btn-slate btn-sm" style="margin-bottom:8px;" onclick="hwDownloadOne(\'' + escA(phone) + '\')">⬇️ Download the PDF</button>' : '<p style="color:#fca5a5; margin:0 0 8px 0;">This student has not uploaded anything.</p>') +
     (k.marks ? '<label class="label">Marks (out of ' + t.maxMarks + ')</label><input type="number" id="hwf-marks" class="input" min="0" max="' + t.maxMarks + '" step="0.5" value="' + (f.marks === null || f.marks === undefined ? '' : f.marks) + '">' : '') +
     '<label class="label">🏅 How much is done correctly (%)' + (k.marks ? ' — empty = worked out from the marks' : '') + '</label><input type="number" id="hwf-pct" class="input" min="0" max="100" step="5" value="' + (f.pct === undefined || f.pct === null ? '' : f.pct) + '" placeholder="e.g. 100, 80, 50">' +
-    '<div style="font-size:0.74rem; color:var(--text-muted); margin:-6px 0 10px 0;">100% = 🌟 Excellent • 70%+ = 👍 Good • below 70% = 📘 Average' + (missCfg().redoBelow > 0 ? ' • below ' + missCfg().redoBelow + '% the student <b>must submit again</b> (automatic)' : '') + '</div>' +
+    '<div style="font-size:0.74rem; color:var(--text-muted); margin:-6px 0 10px 0;">90%+ = 🌟 Excellent • 80%+ = 👍 Good • 50%+ = 📘 Average • below 50% = ⚠️ Needs improvement' + (missCfg().redoBelow > 0 ? ' • below ' + missCfg().redoBelow + '% the student <b>must submit again</b> (automatic)' : '') + '</div>' +
     '<label class="label">Remark</label><input type="text" id="hwf-remark" class="input" value="' + escA(f.remark || (d.subs[phone] ? '' : 'Not submitted.')) + '">' +
     '<label class="label">Overall result (2–3 sentences)</label><textarea id="hwf-overall" class="textarea" rows="2">' + escT(f.overall || '') + '</textarea>' +
     ((f.errors || []).length || (f.qtable || []).length ? '<p style="font-size:0.78rem; color:var(--text-muted); margin:0 0 8px 0;">📋 The question table and the ' + (f.errors || []).length + ' detailed error box(es) stay as they are (change them by pasting a new JSON).</p>' : '') +
@@ -16987,6 +17046,7 @@ function renderStudentHwHtml(u) {
     if (f && f.status === 'checked') {
       status = (hwNewFbIds[t.id] ? '<div class="fb-new blink-live">🆕 Your teacher has checked this — read the feedback below</div>' : '') +
         hwFeedbackHtml(f, t) +
+        rankCardHtml('hw_' + t.id, '') +      // 🏆 my place in the class for this homework
         // 📄 the same report the teacher gets: feedback + the student's own pages with the mistakes marked
         stuCheckedCopyHtml(t, f, s) +
         '<button type="button" class="btn btn-blue btn-sm" style="margin-top:8px;" onclick="studentHwReport(\'' + escA(t.id) + '\')">📄 Download full report (feedback' + (f.chkId || f.pgKey ? ' + your checked copy' : '') + ')</button>' +
@@ -18063,6 +18123,7 @@ function renderSubmissionResultScreen(sub) {
 
   var backTarget = isAdmin ? 'view-admin' : 'view-student-dash';
   resBox.innerHTML =
+    (isAdmin ? '' : '<div style="margin-bottom:10px;">' + rankCardHtml(sub.testId, '') + '</div>') +     // 🏆 my rank in this exam
     '<div class="card card-green">' +
       '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">' +
         '<div>' +

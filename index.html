@@ -1723,21 +1723,93 @@ function setMenuDot(btnId, n, title) {
 function updateWorkAlerts() {
   if (cloud.role !== 'admin') return;
   var hw = newHwSubs(), ex = newExamSubs();
-  setMenuDot('tab-btn-hw', hw.length, hw.length + ' new homework / assignment copies');
+  // the red number on "Homework" = the copies still to check (new + corrected), once the feedback list is here
+  if (hwSubsLive && hwFbLive) { var st0 = hwCheckState(); hw = st0.neu.concat(st0.redo); }
+  setMenuDot('tab-btn-hw', hw.length, hw.length + ' homework / assignment copies to check');
   setMenuDot('tab-btn-tests', ex.length, ex.length + ' new exam results');
   // once after opening the portal: say what came in
   if (!workAlertShown && cloud.ready && hwSubsLive && (hw.length || ex.length)) {
     workAlertShown = true;
     setTimeout(function() {
-      showToast('🔴 New since you last looked: ' + [hw.length ? hw.length + ' homework cop' + (hw.length === 1 ? 'y' : 'ies') : '', ex.length ? ex.length + ' exam result' + (ex.length === 1 ? '' : 's') : ''].filter(Boolean).join(' • '), 'error');
+      showToast('🔴 Waiting for you: ' + [hw.length ? hw.length + ' homework cop' + (hw.length === 1 ? 'y' : 'ies') + ' to check' : '', ex.length ? ex.length + ' new exam result' + (ex.length === 1 ? '' : 's') : ''].filter(Boolean).join(' • '), 'error');
     }, 3600);
   }
 }
 window.onHwSubs = function(list) {
+  var prev = hwSubsLive;
   hwSubsLive = list;
+  ensureHwFbLive();
   updateWorkAlerts();
+  // 🔔 a copy that came in just now (while the portal is open): a message to the teacher at once
+  if (prev && cloud.role === 'admin') {
+    var before = {};
+    prev.forEach(function(s) { before[s.taskId + '_' + s.studentId] = Number(s.uploadedAt || 0); });
+    var fresh = list.filter(function(s) { var b = before[s.taskId + '_' + s.studentId]; return Number(s.uploadedAt || 0) > (b || 0) && Date.now() - Number(s.uploadedAt || 0) < 3600000; });
+    fresh.slice(0, 3).forEach(function(s) {
+      var t = (hwCache || []).find(function(x) { return x.id === s.taskId; }) || {};
+      var again = before[s.taskId + '_' + s.studentId] !== undefined;
+      var msg = (s.studentName || s.studentId) + ' sent ' + (again ? 'a CORRECTED copy of' : '') + ' “' + (t.title || 'homework') + '” — please check it.';
+      showToast('📒 ' + msg, 'success');
+      if (typeof sysNotify === 'function') sysNotify('📒 New copy to check', msg, 'hwsub-' + s.taskId + '-' + s.studentId, 'hw');
+    });
+  }
   if (cloud.role === 'admin' && currentAdminTab === 'hw' && !hwDetail) renderAdminHwContent();
+  if (cloud.role === 'admin' && currentAdminTab === 'dash') renderAdminDashContent();
 };
+// ---- 📒 what the teacher still has to check: 🆕 first copies • 🔁 corrected copies (sent after the check) ----
+function ensureHwFbLive() {
+  if (cloud.role !== 'admin' || hwFbLive || !window.FBAPI || !FBAPI.watchHwFeedback) return;
+  FBAPI.watchHwFeedback(function(list) {
+    var first = !hwFbLive;
+    hwFbLive = list;
+    updateWorkAlerts();
+    if (currentAdminTab === 'hw' && !hwDetail) renderAdminHwContent();
+    if (currentAdminTab === 'dash') renderAdminDashContent();
+    if (first && typeof runMissCheck === 'function') setTimeout(function() { runMissCheck(true); }, 500);
+  });
+}
+function hwCheckState(taskId) {
+  var out = { neu: [], redo: [], done: [] };
+  if (!hwSubsLive || !hwFbLive) return out;
+  var fb = {};
+  hwFbLive.forEach(function(f) { fb[f.taskId + '_' + f.studentId] = f; });
+  var live = hwCache ? {} : null;
+  if (hwCache) hwCache.forEach(function(t) { live[t.id] = 1; });
+  hwSubsLive.forEach(function(s) {
+    if (taskId && s.taskId !== taskId) return;
+    if (live && !live[s.taskId]) return;                      // a deleted task
+    var f = fb[s.taskId + '_' + s.studentId], up = Number(s.uploadedAt || 0);
+    if (!f || f.status !== 'checked') { if (f && f.status === 'missing' && !(up > Number(f.checkedAt || 0))) return; out.neu.push(s); }
+    else if (up > Number(f.checkedAt || 0)) out.redo.push(s);
+    else out.done.push(s);
+  });
+  return out;
+}
+// the banner on the dashboard / homework page: "14 copies to check: 9 new • 5 corrected"
+function hwCheckBannerHtml() {
+  if (cloud.role !== 'admin' || !hwSubsLive || !hwFbLive) return '';
+  var st = hwCheckState();
+  var n = st.neu.length + st.redo.length;
+  if (!n) return '<div class="card" style="padding:10px 14px; border-left:4px solid #16a34a; color:#bbf7d0;">✅ <b>All homework copies are checked.</b> Nothing waiting.</div>';
+  return '<div class="card blink-live" style="padding:12px 14px; border:2px solid #dc2626; background:rgba(220,38,38,0.10);">' +
+    '<div style="font-weight:900; font-size:1.02rem;">📒 ' + n + ' homework cop' + (n === 1 ? 'y' : 'ies') + ' waiting for you to check</div>' +
+    '<div style="margin:4px 0 8px; font-size:0.86rem;">🆕 <b>' + st.neu.length + '</b> new (first time) &nbsp;•&nbsp; 🔁 <b>' + st.redo.length + '</b> corrected copies to check again</div>' +
+    '<button type="button" class="btn btn-red btn-sm" onclick="hwDetail=null; switchAdminTab(\'hw\')">📋 Open the list</button></div>';
+}
+// 🌙 the evening reminder (the portal open after 8 pm, once a day): "check them tonight"
+setInterval(function() {
+  if (cloud.role !== 'admin' || !hwSubsLive || !hwFbLive) return;
+  var now = new Date();
+  if (now.getHours() < 20) return;
+  var day = localDateStr(now), key = 'acsm_hw_remind';
+  try { if (localStorage.getItem(key) === day) return; } catch (e) {}
+  var st = hwCheckState(), n = st.neu.length + st.redo.length;
+  if (!n) return;
+  try { localStorage.setItem(key, day); } catch (e) {}
+  var msg = n + ' homework cop' + (n === 1 ? 'y is' : 'ies are') + ' waiting: ' + st.neu.length + ' new • ' + st.redo.length + ' corrected. Please check them tonight.';
+  showToast('🌙 ' + msg, 'error');
+  if (typeof sysNotify === 'function') sysNotify('🌙 Homework to check tonight', msg, 'hw-remind', 'hw');
+}, 5 * 60000);
 function greetWord(h) {
   if (h === undefined) h = new Date().getHours();
   if (h >= 5 && h < 12) return { w: 'Good Morning', ico: '🌅', c1: '#f59e0b', c2: '#ea580c' };
@@ -3555,7 +3627,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261126012948';
+var APP_BUILD = '20261127000602';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -4279,6 +4351,7 @@ function renderAdminDashContent() {
   var box = document.getElementById('admin-body-content');
   box.innerHTML =
     renderBackupReminderHtml() +
+    hwCheckBannerHtml() +              // 📒 copies waiting to be checked (new • corrected)
     '<div class="grid-4" style="margin-bottom:20px;">' +
       '<div class="card card-amber" style="cursor:pointer; margin:0;" onclick="switchAdminTab(\'inputq\')">' +
         '<div style="font-size:0.8rem; color:var(--text-muted);">AI Question Importer</div>' +
@@ -14840,7 +14913,8 @@ function hwGradeBadge(f, t) {
 // 🔁 checking a REDO copy: the student sends only the questions that were wrong. The questions that were already
 // correct in the earlier check stay correct ("✔ correct in your first copy") — they are not "not attempted" — and the
 // % / grade / redo rule then count the WHOLE homework. old = the earlier feedback of this student.
-function hwQKey(label) { return String(label || '').toLowerCase().replace(/^\s*q(?:uestion)?\.?\s*/, '').replace(/[\s.]+/g, ''); }
+// "Q1(a)", "1a", "Q.1 (a)", "Question 1 a" → "1a" (the same question however it is written)
+function hwQKey(label) { return String(label || '').toLowerCase().replace(/^\s*q(?:uestion|ues|n)?\.?\s*(?:no\.?\s*)?/, '').replace(/[^0-9a-z]/g, ''); }
 // every question number in a text: "Q1–Q20" → 1…20, "Q4, Q7" → 4, 7
 function hwNumsIn(s) {
   var out = [];
@@ -15078,10 +15152,7 @@ async function runMissCheck(force) {
   if (!adminDataLoaded()) { setTimeout(function() { runMissCheck(true); }, 15000); return; }
   // 💰 the upload records come live already (hwSubsLive) and the feedback records are watched live (read once per
   // session, then only the changes) — before, all of them were read again in full every 10 minutes
-  if (FBAPI.watchHwFeedback && !hwFbLive) {
-    FBAPI.watchHwFeedback(function(list) { var first = !hwFbLive; hwFbLive = list; if (first) setTimeout(function() { runMissCheck(true); }, 500); });
-    return;   // runs again as soon as the feedback list has arrived
-  }
+  if (FBAPI.watchHwFeedback && !hwFbLive) { ensureHwFbLive(); return; }   // runs again as soon as the feedback list has arrived
   missRunning = true; missRunAt = Date.now();
   try {
     var r = await Promise.all([
@@ -15370,11 +15441,19 @@ function renderAdminHwContent() {
   var list = (hwCache || []).filter(function(t) { return hwKind(t) === hwAdminKind && (hwClassFilter === 'ALL' || t.cls === hwClassFilter || t.cls === 'ALL'); });
   var cards = list.map(function(t) {
     var n = hwStudentsOf(t).length;
-    var nNew = newHwSubs(t.id).length;
-    return '<div class="card" style="border-left:4px solid ' + (hwOverdue(t) ? '#64748b' : '#22c55e') + ';">' +
+    var cs = hwCheckState(t.id), known = !!(hwSubsLive && hwFbLive);
+    var nNew = known ? cs.neu.length : newHwSubs(t.id).length;
+    return '<div class="card" style="border-left:4px solid ' + (cs.neu.length + cs.redo.length ? '#dc2626' : (hwOverdue(t) ? '#64748b' : '#22c55e')) + ';">' +
       '<div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:flex-start;">' +
         '<h3 style="margin:0 0 4px 0;">' + k.icon + ' ' + esc(t.title) + '</h3>' +
-        '<span>' + (nNew ? '<span class="badge blink-live" style="background:#dc2626; color:#fff; margin-right:4px;">🔴 ' + nNew + ' new cop' + (nNew === 1 ? 'y' : 'ies') + '</span>' : '') + (hwOverdue(t) ? '<span class="badge" style="background:#334155;">Closed</span>' : '<span class="badge badge-easy">Open</span>') + '</span>' +
+        '<span>' + (hwOverdue(t) ? '<span class="badge" style="background:#334155;">Closed</span>' : '<span class="badge badge-easy">Open</span>') + '</span>' +
+      '</div>' +
+      // 📒 the copies: 🆕 new (to check) • 🔁 corrected (check again) • ✔ checked
+      '<div style="display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 8px;">' +
+        (nNew ? '<span class="badge blink-live" style="background:#dc2626; color:#fff;">🆕 ' + nNew + ' new — to check</span>' : '') +
+        (cs.redo.length ? '<span class="badge blink-live" style="background:#ca8a04; color:#fff;">🔁 ' + cs.redo.length + ' corrected — check again</span>' : '') +
+        (known ? '<span class="badge" style="background:#1e293b; color:#86efac;">✔ ' + cs.done.length + ' checked</span>' : '') +
+        (known && !nNew && !cs.redo.length && cs.done.length ? '<span style="font-size:0.76rem; color:#86efac;">nothing waiting</span>' : '') +
       '</div>' +
       '<div style="font-size:0.8rem; color:var(--text-muted); line-height:1.7; margin-bottom:10px;">' +
         '📁 ' + esc(t.cls === 'ALL' ? 'All classes' : t.cls) + (t.batchNo && t.batchNo !== 'ALL' ? ' • ' + esc(t.batchNo) : '') + (t.board && t.board !== 'ALL' ? ' • 🏫 ' + esc(boardLabel(t.board, t.cls === 'ALL' ? '' : t.cls)) : '') + ' • 👥 ' + n + ' student(s) ' + onlyBadge(t.onlyFor) + '<br>' +
@@ -15396,6 +15475,7 @@ function renderAdminHwContent() {
         '<div><h3 style="margin:0;">📝 Homework &amp; Assignments</h3><p style="margin:2px 0 0 0; font-size:0.78rem; color:var(--text-muted);">Students upload their work as a PDF. Download them (all or a few), get them checked, paste the feedback — students see their mistakes, hints and your remark.</p></div>' +
         '<button type="button" class="btn btn-green" onclick="openHwTaskModal(null)">+ New ' + k.title + '</button>' +
       '</div>' +
+      hwCheckBannerHtml() +
       '<div class="view-switch">' + tab('homework') + tab('assignment') + '</div>' +
       '<div style="margin:10px 0;"><select class="select" style="max-width:220px; margin:0;" onchange="hwClassFilter=this.value; renderAdminHwContent();">' + filtOpts + '</select></div>' +
       (hwCache ? '<div class="grid-2">' + (cards || '<div class="card"><p style="color:var(--text-muted); margin:0;">Nothing yet. Press “+ New ' + k.title + '”.</p></div>') + '</div>' : '<p style="color:var(--text-muted);">Loading…</p>') +
@@ -15568,12 +15648,25 @@ function renderHwDetail() {
   var d = hwDetail, t = d.task, k = HW_KINDS[hwKind(t)];
   var stus = hwStudentsOf(t);
   var nSub = stus.filter(function(u) { return d.subs[u.id]; }).length;
-  var nChk = stus.filter(function(u) { return d.fb[u.id] && d.fb[u.id].status === 'checked'; }).length;
-  var rows = stus.map(function(u) {
+  // every student's state: 🆕 new (never checked) • 🔁 corrected copy (sent after the check) • ✔ checked • ❌ none
+  var stOf = function(u) {
+    var s = d.subs[u.id], f = d.fb[u.id];
+    if (!s) return 'none';
+    if (!f || f.status !== 'checked') return 'neu';
+    return Number(s.uploadedAt || 0) > Number(f.checkedAt || 0) ? 'redo' : 'done';
+  };
+  var cnt = { neu: 0, redo: 0, done: 0, none: 0 };
+  stus.forEach(function(u) { cnt[stOf(u)]++; });
+  var nChk = cnt.done;
+  var view = d.view || 'all';
+  var shown = view === 'all' ? stus : stus.filter(function(u) { return stOf(u) === view; });
+  var chip = function(v, label, bg) { return '<button type="button" class="badge' + (view === v ? '' : '') + '" style="border:' + (view === v ? '2px solid #fff' : '0') + '; cursor:pointer; background:' + bg + '; color:#fff; font:inherit; font-size:0.78rem; font-weight:800; padding:4px 10px;" onclick="hwDetail.view=\'' + v + '\'; renderHwDetail();">' + label + '</button>'; };
+  var rows = shown.map(function(u) {
     var s = d.subs[u.id], f = d.fb[u.id];
     var st = s ? '<span style="color:#86efac;">✅ ' + fmtDateTime(s.uploadedAt) + '</span>' + (s.late ? ' <span class="badge badge-hard">late</span>' : '') + (s.driveFailed ? '<br><span style="font-size:0.72rem; color:#fcd34d;" title="' + escA(s.driveFailed) + '">⚠ kept in the portal — your Drive did not answer</span>' : '')
       : (hwOverdue(t) ? '<span style="color:#fca5a5;">❌ Not submitted</span>' : '<span style="color:var(--text-muted);">⏳ Not yet</span>');
-    var fbTxt = !f ? '<span style="color:var(--text-muted);">—</span>'
+    var fbTxt = !f ? (s ? '<span class="badge" style="background:#dc2626; color:#fff;">🆕 NEW — to check</span>' : '<span style="color:var(--text-muted);">—</span>')
+      : (f.status === 'missing' && s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0)) ? '<span class="badge" style="background:#dc2626; color:#fff;">🆕 sent late — to check</span>'
       : (f.status === 'missing' ? '<span style="color:#fca5a5;">Remark given</span>'
         : '<span style="color:#86efac;">✔ Checked</span>' + (k.marks && f.marks !== null && f.marks !== undefined ? ' <b>' + f.marks + ' / ' + (t.maxMarks || '') + '</b>' : '') +
           (s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0) ? '<br><span class="badge" style="background:#ca8a04; color:#fff;">🔁 corrected copy — check again</span>' : (f.resubmit ? '<br><span style="font-size:0.72rem; color:#fde68a;">asked to correct</span>' : '')));
@@ -15597,10 +15690,13 @@ function renderHwDetail() {
         '<button type="button" class="btn btn-slate btn-sm" onclick="closeHwDetail()">◀ Back</button>' +
       '</div>' +
       '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">' +
-        '<span class="badge" style="background:#1e293b;">👥 ' + stus.length + ' students</span>' +
-        '<span class="badge badge-easy">📤 ' + nSub + ' submitted</span>' +
-        '<span class="badge" style="background:#1e293b; color:#86efac;">✔ ' + nChk + ' checked</span>' +
-        '<span class="badge badge-hard">❌ ' + (stus.length - nSub) + ' not submitted</span>' +
+        // tap a number to see only those students
+        chip('all', '👥 All ' + stus.length + ' (' + nSub + ' submitted)', '#334155') +
+        chip('neu', '🆕 ' + cnt.neu + ' new — to check', cnt.neu ? '#dc2626' : '#475569') +
+        chip('redo', '🔁 ' + cnt.redo + ' corrected — check again', cnt.redo ? '#ca8a04' : '#475569') +
+        chip('done', '✔ ' + cnt.done + ' checked', '#15803d') +
+        chip('none', '❌ ' + cnt.none + ' not submitted', '#7f1d1d') +
+        (cnt.neu + cnt.redo ? '<button type="button" class="btn btn-amber btn-xs" onclick="hwDetail.sel={}; Object.keys(hwDetail.subs).forEach(function(p){ if (hwNeedsCheck(p)) hwDetail.sel[p]=true; }); renderHwDetail(); showToast(\'☑ The ' + (cnt.neu + cnt.redo) + ' copies to check are ticked — Download ZIP / Copy AI prompt takes only them.\', \'success\');">☑ Tick the ' + (cnt.neu + cnt.redo) + ' to check</button>' : '') +
         (function() {
           var fu = Object.keys(d.subs).map(function(p) { return d.subs[p].folderUrl; }).filter(Boolean)[0];
           return fu ? '<a class="btn btn-blue btn-xs" href="' + escA(fu) + '" target="_blank" rel="noopener">📂 Open the Drive folder</a>' : '';
@@ -17082,7 +17178,7 @@ function renderStudentHwHtml(u) {
         // 📄 the same report the teacher gets: feedback + the student's own pages with the mistakes marked
         stuCheckedCopyHtml(t, f, s) +
         '<button type="button" class="btn btn-blue btn-sm" style="margin-top:8px;" onclick="studentHwReport(\'' + escA(t.id) + '\')">📄 Download full report (feedback' + (f.chkId || f.pgKey ? ' + your checked copy' : '') + ')</button>' +
-      (redoAsk && !redone ? '<div class="blink-live" style="margin-top:8px; background:rgba(234,179,8,0.12); border:1px solid #ca8a04; border-radius:10px; padding:10px 12px; color:#fde68a;"><b>🔁 Correct your mistakes and submit again.</b><div style="font-size:0.84rem; margin:2px 0 8px 0;">Use the hints above, redo those questions, then upload the corrected work.</div><button type="button" class="btn btn-purple btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Upload corrected work</button></div>' : '') +
+      (redoAsk && !redone ? '<div class="blink-live" style="margin-top:8px; background:rgba(234,179,8,0.12); border:1px solid #ca8a04; border-radius:10px; padding:10px 12px; color:#fde68a;"><b>🔁 Correct your mistakes and submit again.</b><div style="font-size:0.84rem; margin:2px 0 8px 0;">Use the hints above, redo ONLY those questions, then upload the corrected pages. The questions you already got right stay right — you do not have to send them again.</div><button type="button" class="btn btn-purple btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Upload corrected work</button></div>' : '') +
       (redone ? '<div style="margin-top:8px; color:#86efac; font-size:0.86rem;">📤 Corrected work uploaded on ' + fmtDateTime(s.uploadedAt) + ' — waiting for your teacher to check it again.</div>' : '');
     } else if (f && f.status === 'missing') {
       var lateSub = s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0);

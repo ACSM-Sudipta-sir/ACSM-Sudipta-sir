@@ -1620,8 +1620,12 @@ var REQUIRED_FOLDERS = [
   'WBJEE (11-12)',
   'JEE Main (11-12)',
   'JEE Advanced (11-12)',
-  'WB Board Class 11-12 (বাংলা)'
+  // West Bengal board: one folder per class (the old joint "11-12" folder stays until its questions are moved)
+  'WB Board Class 11 (বাংলা)',
+  'WB Board Class 12 (বাংলা)'
 ];
+// "WB Board Class 11 (বাংলা)" → 11 (a West Bengal board folder of ONE class), else 0
+function wbClassOf(folder) { var m = String(folder || '').match(/WB\s*Board\s*Class\s*(11|12)\b(?!\s*-)/i); return m ? Number(m[1]) : 0; }
 
 var K = {
   U: 'acsm_v9_users',
@@ -3629,7 +3633,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261128000813';
+var APP_BUILD = '20261128001950';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -3835,6 +3839,18 @@ var DB = {
       Store.set(K.FOLDVER, '2');
     } else {
       this.ensureRequiredFolders();
+    }
+    // 🏫 once: the joint "WB Board Class 11-12" folder gets a folder for each class next to it
+    if (Number(Store.get(K.FOLDVER) || 0) < 3) {
+      var ps = this.get(K.PARTS).slice(), changed = false;
+      var at = ps.findIndex(function(p) { return /WB\s*Board\s*Class\s*11\s*-\s*12/i.test(p); });
+      ['WB Board Class 11 (বাংলা)', 'WB Board Class 12 (বাংলা)'].forEach(function(f, i) {
+        if (ps.indexOf(f) !== -1) return;
+        if (at !== -1) ps.splice(at + 1 + i, 0, f); else ps.push(f);
+        changed = true;
+      });
+      if (changed) this.set(K.PARTS, ps);
+      Store.set(K.FOLDVER, '3');
     }
     if (Store.get(K.BATCHES) === null) this.set(K.BATCHES, []);
     if (Store.get(K.COLS) === null) {
@@ -12718,6 +12734,31 @@ function doMoveToChapter() {
   renderAdminQBankContent();
   showToast('📂 ' + n + ' question(s) moved to “' + ch + '”.', 'success');
 }
+// 📦 a whole chapter → another class folder (e.g. the old joint "WB Board Class 11-12" → "WB Board Class 11")
+function openMoveChapterClass() {
+  var cls = activePartition, ch = qbChapter;
+  if (cls === 'ALL' || ch === 'ALL') return;
+  var n = DB.get(K.QB).filter(function(q) { return (q.partition || 'Class 12') === cls && chapterOf(q) === ch; }).length;
+  var others = DB.get(K.PARTS).filter(function(p) { return p !== cls; });
+  document.getElementById('row-editor-body').innerHTML =
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><h3 style="margin:0;">📦 Move “' + esc(ch) + '” to another class</h3><button type="button" onclick="closeModal()" class="btn btn-slate btn-sm">✕ Close</button></div>' +
+    '<p style="margin:0 0 10px 0; font-size:0.84rem; color:var(--text-muted);">' + n + ' question(s) of this chapter move from <b>' + esc(cls) + '</b> to the class you choose. The chapter name stays the same. Exams already set keep their own copies.</p>' +
+    '<div style="display:grid; gap:6px;">' + others.map(function(p) {
+      return '<button type="button" class="btn ' + (wbClassOf(p) ? 'btn-teal' : 'btn-slate') + '" style="text-align:left;" onclick="doMoveChapterClass(\'' + escA(p) + '\')">➡️ ' + esc(p) + '</button>';
+    }).join('') + '</div>';
+  document.getElementById('row-editor-modal').classList.remove('hidden');
+}
+function doMoveChapterClass(to) {
+  var cls = activePartition, ch = qbChapter;
+  var qb = DB.get(K.QB), n = 0;
+  qb.forEach(function(q) { if ((q.partition || 'Class 12') === cls && chapterOf(q) === ch) { q.partition = to; n++; } });
+  if (!n) { closeModal(); return; }
+  DB.set(K.QB, qb);
+  closeModal();
+  activePartition = to;              // show it in its new class
+  renderAdminQBankContent();
+  showToast('📦 ' + n + ' question(s) of “' + ch + '” moved to ' + to + '.', 'success');
+}
 function renameChapter() {
   var cls = activePartition, old = qbChapter;
   if (cls === 'ALL' || old === 'ALL') return;
@@ -13026,6 +13067,7 @@ function renderAdminQBankContent() {
           '<button type="button" class="btn btn-teal btn-sm" onclick="openSubtopicSort()" title="Sort the questions of this chapter into sub-topics, so an exam can be made from single sub-topics">🧩 Sub-topics</button>' +
           '<button type="button" class="btn btn-purple btn-sm" onclick="openSplitChapter()" title="Questions of two chapters got mixed? Sort them into the right chapters">🔀 Split mixed chapter</button>' +
           '<button type="button" class="btn btn-slate btn-sm" onclick="renameChapter()">✏️ Rename</button>' +
+          '<button type="button" class="btn btn-teal btn-sm" onclick="openMoveChapterClass()" title="Move this whole chapter to another class folder (e.g. from WB Board 11-12 to WB Board Class 11)">📦 Move to another class</button>' +
           '<button type="button" class="btn btn-red btn-sm" onclick="deleteChapterQuestions(\'' + escA(activePartition) + '\', \'' + escA(qbChapter) + '\')">🗑️ Delete this whole chapter</button>' +
         '</div>' +
       '</div>';
@@ -14018,6 +14060,9 @@ function sdAssignedTests(u, uClass) {
     if (t.targetSem && t.targetSem !== 'ALL' && (u.semester || '') !== t.targetSem) return false;
     if (!t.targetBatch || t.targetBatch === 'ALL') return true;
     if (t.targetBatch === uClass) return true;
+    // 🏫 the WB board folder of ONE class: only that class, only West Bengal board students
+    var wbn = wbClassOf(t.targetBatch);
+    if (wbn) return uClass === 'Class ' + wbn && boardGroup(u.board) === 'WB';
     if ((uClass === 'Class 11' || uClass === 'Class 12') && (t.targetBatch.indexOf('11-12') !== -1 || t.targetBatch.indexOf('JEE') !== -1)) return true;
     return false;
   });
@@ -19692,6 +19737,9 @@ function stuTestTargets() {
   if ((cls === "Class 11" || cls === "Class 12") && u.courseSchool !== false) {
     (window.REQUIRED_FOLDERS || []).concat(stuTests.parts).forEach(function (p) {
       if (/JEE/i.test(String(p)) || String(p).indexOf("11-12") !== -1) set.add(p);
+      // the WB board folder of the student's own class ("WB Board Class 11 (বাংলা)")
+      const m = String(p).match(/WB\s*Board\s*Class\s*(11|12)\b(?!\s*-)/i);
+      if (m && cls === "Class " + m[1]) set.add(p);
     });
   }
   return Array.from(set).sort();

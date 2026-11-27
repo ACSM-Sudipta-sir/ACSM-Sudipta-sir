@@ -541,7 +541,7 @@
     /* a class video is playing: no logo over the picture */
     body.video-on #stu-logo-bg { display: none !important; }
     #stu-logo-bg { position: fixed; inset: 0; z-index: 9250; pointer-events: none; display: flex; align-items: center; justify-content: center; }
-    #stu-logo-bg img { width: min(70vw, 70vh, 560px); aspect-ratio: 1 / 1; object-fit: contain; border-radius: 50%; clip-path: circle(48% at 50% 50%); opacity: 0.08; filter: grayscale(20%); user-select: none; -webkit-user-drag: none; }
+    #stu-logo-bg img { width: min(70vw, 70vh, 560px); aspect-ratio: 1 / 1; object-fit: contain; border-radius: 50%; clip-path: circle(48% at 50% 50%); opacity: 0.04; filter: grayscale(20%); user-select: none; -webkit-user-drag: none; }
     @media print { #stu-logo-bg { display: none; } }
 
     /* ===== buttons come forward: lift on hover, "pop" towards you when tapped, the open menu item stays raised ===== */
@@ -3629,7 +3629,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261128000029';
+var APP_BUILD = '20261128000813';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -4093,7 +4093,7 @@ function stuNameTag(on) {
     el.style.cssText = 'position:fixed; left:calc(8px + env(safe-area-inset-left, 0px)); bottom:calc(8px + env(safe-area-inset-bottom, 0px)); z-index:9450; pointer-events:none; max-width:60vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:3px 10px; border-radius:999px; background:rgba(15,23,42,0.72); border:1px solid rgba(148,163,184,0.45); color:#e2e8f0; font:700 12px/1.3 system-ui, "Noto Sans Bengali", sans-serif; -webkit-user-select:none; user-select:none;';
     document.body.appendChild(el);
   }
-  el.textContent = '👤 ' + (currentUser.fullName || '');
+  el.textContent = '👤 ' + (currentUser.fullName || '') + (currentUser.id ? ' • ' + currentUser.id : '');
 }
 function showScreen(screenId) {
   DB.init();
@@ -9501,7 +9501,7 @@ function rankCardHtml(testId, waitText) {
   return '<button type="button" class="rk-mini r' + Math.min(r.me.r, 4) + '" onclick="rankOpen=\'' + escA(r.d.id) + '\'; setStudentTab(\'ranker\')">' +
     '<span class="rk-mini-m">' + (medalOf(r.me.r) || '🎖️') + '</span>' +
     '<span style="flex:1; text-align:left;"><b>Rank #' + r.me.r + '</b> of ' + r.d.n + ' in your class' +
-      '<small>' + (hw ? r.me.p + '% • ' + esc(r.me.gr || ((hwGrade(r.me.p) || {}).label || '')) : r.me.s + ' / ' + r.me.m + ' • ' + Math.round(r.me.p) + '%') + ' • class average ' + pctTxt(r.d.avg) + '</small></span>' +
+      '<small>' + (hw ? esc((hwGrade(r.me.p) || {}).label || r.me.gr || '') :r.me.s + ' / ' + r.me.m + ' • ' + Math.round(r.me.p) + '%') + ' • class average ' + pctTxt(r.d.avg) + '</small></span>' +
     '<span style="font-size:0.78rem; opacity:0.85;">Rank card ›</span></button>';
 }
 
@@ -9533,10 +9533,10 @@ function studentRankerHtml(u) {
   var myK = rankCode(u.id, d.testId);
   var me = (d.list || []).find(function(x) { return x.k === myK; });
   var card = me
-    ? '<div class="rk-me r' + Math.min(me.r, 4) + '"><div class="rk-medal">' + (medalOf(me.r) || '🎖️') + '</div><div><div class="rk-big">Rank #' + me.r + ' <small>of ' + d.n + '</small></div><div class="rk-sub">' + (d.kind === 'hw' ? Math.round(me.p) + '% done correctly • ' + esc(me.gr || ((hwGrade(me.p) || {}).label || '')) : me.s + ' / ' + me.m + ' marks • ' + Math.round(me.p) + '%') + ' • class average ' + pctTxt(d.avg) + '</div></div></div>'
+    ? '<div class="rk-me r' + Math.min(me.r, 4) + '"><div class="rk-medal">' + (medalOf(me.r) || '🎖️') + '</div><div><div class="rk-big">Rank #' + me.r + ' <small>of ' + d.n + '</small></div><div class="rk-sub">' + (d.kind === 'hw' ? esc((hwGrade(me.p) || {}).label || me.gr || '') :me.s + ' / ' + me.m + ' marks • ' + Math.round(me.p) + '%') + ' • class average ' + pctTxt(d.avg) + '</div></div></div>'
     : '<div class="card"><p style="margin:0; color:var(--text-muted);">' + (d.kind === 'hw' ? 'Your copy of this homework is not in the list (not submitted / not checked yet).' : 'You did not take this exam.') + '</p></div>';
   var rows = (d.list || []).map(function(x) {
-    return '<div class="rk-row' + (x.k === myK ? ' me' : '') + '"><span class="rk-r">' + (medalOf(x.r) || '#' + x.r) + '</span><span class="rk-nm">' + esc(x.nm) + (x.k === myK ? ' <b>(you)</b>' : '') + '</span><span class="rk-s">' + (d.kind === 'hw' ? esc(String(x.gr || ((hwGrade(x.p) || {}).label || '')).replace(/^\S+\s/, '')) : x.s + ' / ' + x.m) + '</span><span class="rk-p">' + Math.round(x.p) + '%</span></div>';
+    return '<div class="rk-row' + (x.k === myK ? ' me' : '') + '"><span class="rk-r">' + (medalOf(x.r) || '#' + x.r) + '</span><span class="rk-nm">' + esc(x.nm) + (x.k === myK ? ' <b>(you)</b>' : '') + '</span><span class="rk-s">' + (d.kind === 'hw' ? esc(String((hwGrade(x.p) || {}).label || x.gr || '').replace(/^\S+\s/, '')) : x.s + ' / ' + x.m) + '</span><span class="rk-p">' + (d.kind === 'hw' ? '' : Math.round(x.p) + '%') + '</span></div>';
   }).join('');
   return head + chips +
     '<div class="rank-secure" oncontextmenu="return false" ondragstart="return false">' +
@@ -11139,7 +11139,7 @@ function waHwReport() {
     }
     if (f && f.status === 'checked') {
       var p = hwPct(f, t), g = hwGrade(p);
-      return { u: u, tag: 'done', badge: '<span class="badge badge-easy">' + (p !== null ? p + '%' : 'checked') + '</span>', msg: head + '✅ Checked' + (p !== null ? ': *' + p + '%* done correctly' : '') + (g ? ' — ' + g.label.replace(/^\S+\s/, '') : '') + (f.marks !== null && f.marks !== undefined && f.maxMarks ? '\n📊 Marks: ' + f.marks + ' / ' + f.maxMarks : '') + (f.resubmit && !(s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0)) ? '\n✏️ Some answers must be fixed and sent again — the hints are in the app.' : '\n✅ All clear — nothing pending.') };
+      return { u: u, tag: 'done', badge: '<span class="badge badge-easy">' + (p !== null ? p + '%' : 'checked') + '</span>', msg: head + '✅ Checked' + (g ? ' — Result: *' + g.label.replace(/^\S+\s/, '') + '*' : '') + (f.marks !== null && f.marks !== undefined && f.maxMarks ? '\n📊 Marks: ' + f.marks + ' / ' + f.maxMarks : '') + (f.resubmit && !(s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0)) ? '\n✏️ Some answers must be fixed and sent again — the hints are in the app.' : '\n✅ All clear — nothing pending.') };
     }
     if (s) return { u: u, tag: 'done', badge: '<span class="badge badge-medium">submitted</span>', msg: head + '📤 Submitted on ' + fmtDateTime(s.uploadedAt) + (s.late ? ' (late)' : '') + ' — being checked.' };
     return { u: u, tag: 'missed', badge: '<span class="badge badge-hard">' + (over ? 'not submitted' : 'pending') + '</span>', msg: head + (over ? '❌ *NOT submitted.* It was due ' + fmtDateTime(t.dueAtMs) + '. Please make sure it is done and uploaded now.' : '⏳ Not submitted yet' + (t.dueAtMs ? ' — due ' + fmtDateTime(t.dueAtMs) : '') + '.') };
@@ -14694,13 +14694,15 @@ async function watermarkPdf(dataUrl, opts) {
     var w = pg.getWidth(), h = pg.getHeight(), m = Math.min(w, h);
     if (logo) {
       var lw = m * 0.45, lh = lw * logo.height / logo.width;
-      pg.drawImage(logo, { x: (w - lw) / 2, y: (h - lh) / 2, width: lw, height: lh, opacity: 0.08 });
+      // (lighter than before, so it never covers the writing)
+      pg.drawImage(logo, { x: (w - lw) / 2, y: (h - lh) / 2, width: lw, height: lh, opacity: 0.04 });
     }
     var size = m * 0.16, tw = font.widthOfTextAtSize('ACSM', size);
-    // big diagonal "ACSM" across the middle of the page
-    pg.drawText('ACSM', { x: w / 2 - tw * 0.35, y: h / 2 - tw * 0.35, size: size, font: font, color: red, opacity: 0.12, rotate: L.degrees(45) });
+    // big diagonal "ACSM" across the middle of the page — very faint
+    pg.drawText('ACSM', { x: w / 2 - tw * 0.35, y: h / 2 - tw * 0.35, size: size, font: font, color: red, opacity: 0.05, rotate: L.degrees(45) });
     var fs = Math.max(6, m * 0.014);
-    pg.drawText(foot, { x: 18, y: 10, size: fs, font: font, color: red, opacity: 0.55 });
+    // the student's name + number only here, small, at the bottom of the page
+    pg.drawText(foot, { x: 18, y: 10, size: fs, font: font, color: red, opacity: 0.45 });
     if (opts.header) {
       // a thin white strip on top: logo + institute name (books)
       var hh = Math.max(16, m * 0.045), hs = hh * 0.42, name = 'A Complete Solution of Mathematics (ACSM)';
@@ -14709,9 +14711,9 @@ async function watermarkPdf(dataUrl, opts) {
       var lx = 14;
       if (logo) { var ls = hh * 0.8, lw2 = ls * logo.width / logo.height; pg.drawImage(logo, { x: lx, y: h - hh + hh * 0.1, width: lw2, height: ls }); lx += lw2 + 8; }
       pg.drawText(name, { x: lx, y: h - hh + (hh - hs) / 2 + hs * 0.15, size: hs, font: font, color: red });
-      if (who) pg.drawText(who, { x: w - font.widthOfTextAtSize(who, hs * 0.75) - 14, y: h - hh + (hh - hs) / 2 + hs * 0.2, size: hs * 0.75, font: font, color: L.rgb(0.3, 0.3, 0.3) });
+      // (the student's name is no longer written at the top — it is at the bottom of every page)
     } else {
-      pg.drawText('ACSM', { x: w - font.widthOfTextAtSize('ACSM', fs * 1.6) - 18, y: h - fs * 1.6 - 10, size: fs * 1.6, font: font, color: red, opacity: 0.45 });
+      pg.drawText('ACSM', { x: w - font.widthOfTextAtSize('ACSM', fs * 1.6) - 18, y: h - fs * 1.6 - 10, size: fs * 1.6, font: font, color: red, opacity: 0.3 });
     }
   });
   return await pdf.save();
@@ -14926,7 +14928,11 @@ function missLockWarnText() {
 // how much of the work is right, in % (the teacher's own %, else marks, else the question table)
 function hwPct(f, t) {
   if (!f || f.status === 'missing') return null;
-  if (f.pct !== undefined && f.pct !== null && f.pct !== '' && !isNaN(Number(f.pct))) return Math.max(0, Math.min(100, Math.round(Number(f.pct))));
+  if (f.pct !== undefined && f.pct !== null && f.pct !== '' && !isNaN(Number(f.pct))) {
+    var pv = Number(f.pct);
+    if (pv > 0 && pv < 1) pv = pv * 100;          // a part written as 0.3 / 0.6 (= 30% / 60%)
+    return Math.max(0, Math.min(100, Math.round(pv)));
+  }
   var mx = Number(f.maxMarks || (t && t.maxMarks) || 0);
   if (f.marks !== null && f.marks !== undefined && f.marks !== '' && mx > 0) return Math.max(0, Math.min(100, Math.round(Number(f.marks) / mx * 100)));
   var q = f.qtable || [];
@@ -14937,17 +14943,21 @@ function hwPct(f, t) {
   }
   return null;
 }
-// the teacher's rule: 90%+ = Excellent • 80%+ = Good • 50%+ = Average • below 50% = Needs improvement
+// the teacher's rule (words, not numbers, for the students):
+// 90%+ Outstanding • 80%+ Excellent • 70%+ Very Good • 60%+ Good • 50%+ Average • below 50% Keep trying
 function hwGrade(p) {
   if (p === null || p === undefined) return null;
-  if (p >= 90) return { key: 'excellent', label: '🌟 Excellent', color: '#16a34a' };
-  if (p >= 80) return { key: 'good', label: '👍 Good', color: '#2563eb' };
+  if (p >= 90) return { key: 'outstanding', label: '🏆 Outstanding', color: '#7c3aed' };
+  if (p >= 80) return { key: 'excellent', label: '🌟 Excellent', color: '#16a34a' };
+  if (p >= 70) return { key: 'verygood', label: '👏 Very Good', color: '#0d9488' };
+  if (p >= 60) return { key: 'good', label: '👍 Good', color: '#2563eb' };
   if (p >= 50) return { key: 'average', label: '📘 Average', color: '#d97706' };
-  return { key: 'weak', label: '⚠️ Needs improvement', color: '#dc2626' };
+  return { key: 'weak', label: '💪 Keep trying', color: '#dc2626' };
 }
 function hwGradeBadge(f, t) {
   var p = hwPct(f, t), g = hwGrade(p);
-  return g ? '<span style="display:inline-block; margin-left:6px; padding:1px 10px; border-radius:999px; background:' + g.color + '; color:#fff; font-weight:800;">' + g.label + ' • ' + p + '%</span>' : '';
+  // students see only the word ("🏆 Outstanding"); the teacher also sees the %
+  return g ? '<span style="display:inline-block; margin-left:6px; padding:1px 10px; border-radius:999px; background:' + g.color + '; color:#fff; font-weight:800;">' + g.label + (cloud.role === 'admin' ? ' • ' + p + '%' : '') + '</span>' : '';
 }
 // 🔁 checking a REDO copy: the student sends only the questions that were wrong. The questions that were already
 // correct in the earlier check stay correct ("✔ correct in your first copy") — they are not "not attempted" — and the
@@ -16040,7 +16050,7 @@ function hwFeedbackHtml(f, t) {
   var groups = hwFeedbackGroups(f);
   return '<div class="fb-card">' +
     '<div class="fb-head">✅ Checked by your teacher' + (k.marks && f.marks !== null && f.marks !== undefined ? ' <span class="fb-marks">' + f.marks + ' / ' + (f.maxMarks || t.maxMarks) + '</span>' : '') + hwGradeBadge(f, t) + '</div>' +
-    (f.redoAuto && f.resubmit ? '<div style="margin:6px 0; padding:8px 10px; border-radius:8px; background:rgba(217,119,6,0.15); border:1px solid #d97706; color:#fde68a; font-size:0.86rem;">✏️ <b>' + hwPct(f, t) + '% is right.</b> Use the hints below, fix the rest and <b>send your fixed work</b> within ' + missCfg().redoDays + ' day(s)' + (missCfg().on ? ' — otherwise it counts as not done' : '') + '.</div>' : '') +
+    (f.redoAuto && f.resubmit ? '<div style="margin:6px 0; padding:8px 10px; border-radius:8px; background:rgba(217,119,6,0.15); border:1px solid #d97706; color:#fde68a; font-size:0.86rem;">✏️ <b>A good start!</b> Use the hints below, fix the rest and <b>send your fixed work</b> within ' + missCfg().redoDays + ' day(s)' + (missCfg().on ? ' — otherwise it counts as not done' : '') + '.</div>' : '') +
     (f.remark ? '<div class="fb-remark">💬 ' + mxa(f.remark) + '</div>' : '') +
     (f.summary ? '<div class="fb-summary">' + mxa(f.summary) + '</div>' : '') +
     fbDetailHtml(f) +
@@ -16494,7 +16504,10 @@ function fbFeedbackCanvases(t, u, f) {
     g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
     g.fillStyle = '#b91c1c'; g.fillRect(0, 0, W, 14);
     g.fillStyle = '#64748b'; g.font = '600 22px ' + FONT; g.textBaseline = 'alphabetic';
-    g.fillText('A Complete Solution of Mathematics — ' + (u.fullName || '') + (u.regNo ? ' (' + u.regNo + ')' : '') + ' — ' + (t.title || ''), M, 48);
+    g.fillText('A Complete Solution of Mathematics — ' + (t.title || ''), M, 48);
+    // the student's name + number only at the BOTTOM of the page, small and faint
+    g.save(); g.fillStyle = 'rgba(100,116,139,0.75)'; g.font = '600 18px ' + FONT;
+    g.fillText((u.fullName || '') + (u.id ? '  •  ' + u.id : ''), M, H - 28); g.restore();
     pages.push(c); y = 90;
   };
   var need = function(h) { if (!c || y + h > H - 70) newPage(); };
@@ -16529,7 +16542,7 @@ function fbFeedbackCanvases(t, u, f) {
   // title + marks
   g.fillStyle = '#7f1d1d'; g.font = '900 44px ' + FONT; g.fillText('Teacher\'s Feedback', M, y + 40); y += 64;
   var pct = hwPct(f, t), gr = hwGrade(pct);
-  para((f.marks !== null && f.marks !== undefined && f.maxMarks ? 'Marks: ' + f.marks + ' / ' + f.maxMarks + '    ' : '') + (pct !== null ? 'Done correctly: ' + pct + '%    ' : '') + (gr ? 'Grade: ' + gr.label.replace(/^\S+\s/, '') : ''), 30, '#065f46', '800');
+  para((f.marks !== null && f.marks !== undefined && f.maxMarks ? 'Marks: ' + f.marks + ' / ' + f.maxMarks + '    ' : '') + (gr ? 'Result: ' + gr.label.replace(/^\S+\s/, '') : ''), 30, '#065f46', '800');
   if (f.remark) { gap(6); para('💬 ' + f.remark, 28, '#111827', '700'); }
   if (f.overall) { gap(4); para(f.overall, 26, '#334155'); }
   if (f.resubmit) { gap(8); need(70); g.fillStyle = '#fef2f2'; g.fillRect(M, y, W - 2 * M, 60); g.strokeStyle = '#dc2626'; g.lineWidth = 3; g.strokeRect(M, y, W - 2 * M, 60); g.fillStyle = '#b91c1c'; g.font = '800 26px ' + FONT; g.fillText('✏️ Fix the mistakes using the hints and send your work again.', M + 18, y + 40); y += 76; }
@@ -17109,7 +17122,8 @@ function hwCheckJson() {
     var pctIn = it.percent !== undefined ? it.percent : (it.pct !== undefined ? it.pct : it.percentage);
     var fbNew = fbCopyDetail(fbNormDetail(it), {
       id: t.id + '_' + p, taskId: t.id, studentId: p, status: 'checked', marks: marks, maxMarks: k.marks ? Number(t.maxMarks) : 0,
-      pct: pctIn !== undefined && pctIn !== null && pctIn !== '' && !isNaN(parseFloat(pctIn)) ? Math.max(0, Math.min(100, parseFloat(pctIn))) : null,
+      // a part written as 0.3 / 0.6 is read as 30% / 60%
+      pct: pctIn !== undefined && pctIn !== null && pctIn !== '' && !isNaN(parseFloat(pctIn)) ? Math.max(0, Math.min(100, (function(v) { return v > 0 && v < 1 ? v * 100 : v; })(parseFloat(pctIn)))) : null,
       remark: String(it.remark || '').trim(), summary: String(it.summary || '').trim(),
       skipped: hwStrList(it.skipped || it.notAttempted), mistakes: hwStrList(it.mistakes), missed: hwStrList(it.missed || it.missedParts || it.missing), hints: hwStrList(it.hints || it.suggestions), resubmit: !!it.resubmit, checkedAt: Date.now()
     });

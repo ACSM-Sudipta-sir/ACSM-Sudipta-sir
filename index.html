@@ -3628,7 +3628,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261127231600';
+var APP_BUILD = '20261127235224';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -11135,7 +11135,7 @@ function waHwReport() {
     var head = 'Dear Guardian,\n📒 *' + k.title + ': ' + (t.title || '') + '*\n👤 ' + (u.fullName || '') + '\n';
     if (f && f.status === 'checked') {
       var p = hwPct(f, t), g = hwGrade(p);
-      return { u: u, tag: 'done', badge: '<span class="badge badge-easy">' + (p !== null ? p + '%' : 'checked') + '</span>', msg: head + '✅ Checked' + (p !== null ? ': *' + p + '%* done correctly' : '') + (g ? ' — ' + g.label.replace(/^\S+\s/, '') : '') + (f.marks !== null && f.marks !== undefined && f.maxMarks ? '\n📊 Marks: ' + f.marks + ' / ' + f.maxMarks : '') + (f.resubmit && !(s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0)) ? '\n🔁 Some answers must be corrected and submitted again — the hints are in the app.' : '') };
+      return { u: u, tag: 'done', badge: '<span class="badge badge-easy">' + (p !== null ? p + '%' : 'checked') + '</span>', msg: head + '✅ Checked' + (p !== null ? ': *' + p + '%* done correctly' : '') + (g ? ' — ' + g.label.replace(/^\S+\s/, '') : '') + (f.marks !== null && f.marks !== undefined && f.maxMarks ? '\n📊 Marks: ' + f.marks + ' / ' + f.maxMarks : '') + (f.resubmit && !(s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0)) ? '\n✏️ Some answers must be fixed and sent again — the hints are in the app.' : '\n✅ All clear — nothing pending.') };
     }
     if (s) return { u: u, tag: 'done', badge: '<span class="badge badge-medium">submitted</span>', msg: head + '📤 Submitted on ' + fmtDateTime(s.uploadedAt) + (s.late ? ' (late)' : '') + ' — being checked.' };
     return { u: u, tag: 'missed', badge: '<span class="badge badge-hard">' + (over ? 'not submitted' : 'pending') + '</span>', msg: head + (over ? '❌ *NOT submitted.* It was due ' + fmtDateTime(t.dueAtMs) + '. Please make sure it is done and uploaded now.' : '⏳ Not submitted yet' + (t.dueAtMs ? ' — due ' + fmtDateTime(t.dueAtMs) : '') + '.') };
@@ -15053,8 +15053,16 @@ function hwApplyRedoRule(fb, t) {
   var p = hwPct(fb, t);
   if (p !== null) fb.pct = p;
   var c = missCfg();
+  // the teacher's rule: a student sends a copy at most TWICE. Once the second copy (the fixed work) is checked —
+  // or 95% and more is right — there is nothing more to send: "✅ All clear — nothing pending".
+  if (fb.status === 'checked' && (Number(fb.redoRound || 0) >= 1 || (p !== null && p >= 95))) {
+    fb.resubmit = false; fb.redoAuto = false; fb.allClear = true;
+    return fb;
+  }
+  fb.allClear = false;
   if (fb.status === 'checked' && p !== null && c.redoBelow > 0 && p < c.redoBelow) { fb.resubmit = true; fb.redoAuto = true; }
   else fb.redoAuto = false;
+  if (fb.status === 'checked' && !fb.resubmit) fb.allClear = true;
   return fb;
 }
 
@@ -15968,7 +15976,7 @@ function hwFeedbackHtml(f, t) {
   var groups = hwFeedbackGroups(f);
   return '<div class="fb-card">' +
     '<div class="fb-head">✅ Checked by your teacher' + (k.marks && f.marks !== null && f.marks !== undefined ? ' <span class="fb-marks">' + f.marks + ' / ' + (f.maxMarks || t.maxMarks) + '</span>' : '') + hwGradeBadge(f, t) + '</div>' +
-    (f.redoAuto && f.resubmit ? '<div style="margin:6px 0; padding:8px 10px; border-radius:8px; background:rgba(217,119,6,0.15); border:1px solid #d97706; color:#fde68a; font-size:0.86rem;">🔁 <b>' + hwPct(f, t) + '% is done correctly.</b> Use the hints below for the rest and <b>submit the corrected work again</b> within ' + missCfg().redoDays + ' day(s)' + (missCfg().on ? ' — otherwise it counts as a miss' : '') + '.</div>' : '') +
+    (f.redoAuto && f.resubmit ? '<div style="margin:6px 0; padding:8px 10px; border-radius:8px; background:rgba(217,119,6,0.15); border:1px solid #d97706; color:#fde68a; font-size:0.86rem;">✏️ <b>' + hwPct(f, t) + '% is right.</b> Use the hints below, fix the rest and <b>send your fixed work</b> within ' + missCfg().redoDays + ' day(s)' + (missCfg().on ? ' — otherwise it counts as not done' : '') + '.</div>' : '') +
     (f.remark ? '<div class="fb-remark">💬 ' + mxa(f.remark) + '</div>' : '') +
     (f.summary ? '<div class="fb-summary">' + mxa(f.summary) + '</div>' : '') +
     fbDetailHtml(f) +
@@ -16460,7 +16468,8 @@ function fbFeedbackCanvases(t, u, f) {
   para((f.marks !== null && f.marks !== undefined && f.maxMarks ? 'Marks: ' + f.marks + ' / ' + f.maxMarks + '    ' : '') + (pct !== null ? 'Done correctly: ' + pct + '%    ' : '') + (gr ? 'Grade: ' + gr.label.replace(/^\S+\s/, '') : ''), 30, '#065f46', '800');
   if (f.remark) { gap(6); para('💬 ' + f.remark, 28, '#111827', '700'); }
   if (f.overall) { gap(4); para(f.overall, 26, '#334155'); }
-  if (f.resubmit) { gap(8); need(70); g.fillStyle = '#fef2f2'; g.fillRect(M, y, W - 2 * M, 60); g.strokeStyle = '#dc2626'; g.lineWidth = 3; g.strokeRect(M, y, W - 2 * M, 60); g.fillStyle = '#b91c1c'; g.font = '800 26px ' + FONT; g.fillText('🔁 Correct the mistakes using the hints and upload your work again.', M + 18, y + 40); y += 76; }
+  if (f.resubmit) { gap(8); need(70); g.fillStyle = '#fef2f2'; g.fillRect(M, y, W - 2 * M, 60); g.strokeStyle = '#dc2626'; g.lineWidth = 3; g.strokeRect(M, y, W - 2 * M, 60); g.fillStyle = '#b91c1c'; g.font = '800 26px ' + FONT; g.fillText('✏️ Fix the mistakes using the hints and send your work again.', M + 18, y + 40); y += 76; }
+  else if (f.status === 'checked') { gap(8); need(70); g.fillStyle = '#f0fdf4'; g.fillRect(M, y, W - 2 * M, 60); g.strokeStyle = '#16a34a'; g.lineWidth = 3; g.strokeRect(M, y, W - 2 * M, 60); g.fillStyle = '#15803d'; g.font = '800 26px ' + FONT; g.fillText('✅ All clear — nothing pending. You do not need to send this work again.', M + 18, y + 40); y += 76; }
   if ((f.qtable || []).length) {
     head('Question by question');
     f.qtable.forEach(function(r) {
@@ -17055,6 +17064,8 @@ function hwCheckJson() {
     }
     fbNew._gone = gone.filter(function(x, i, a) { return x && a.indexOf(x) === i; });
     hwMergeRedo(fbNew, (hwDetail.fb || {})[p], (hwDetail.subs || {})[p]);   // 🔁 a redo copy: the questions already correct stay correct
+    // the check of the SECOND copy (the fixed work): marked, so no third sending is asked for
+    if (hwIsRedo((hwDetail.fb || {})[p], (hwDetail.subs || {})[p]) && !fbNew.redoRound) fbNew.redoRound = Number(((hwDetail.fb || {})[p] || {}).redoRound || 0) + 1;
     hwPreview.push(hwApplyRedoRule(fbNew, t));    // 🏅 grade + 🔁 automatic redo below the teacher's %
   });
   if (!hwPreview.length) { box.innerHTML = '<p style="color:#fca5a5;">No student of this class was found in the JSON' + (unknown.length ? ' (numbers: ' + esc(unknown.join(', ')) + ')' : '') + '.</p>'; return; }
@@ -17107,7 +17118,7 @@ function openHwFeedbackModal(phone) {
     '<label class="label">Parts missed in an answer (one per line, start with the question: "Q2: the final check")</label><textarea id="hwf-missed" class="textarea" rows="2">' + escT((f.missed || []).join('\n')) + '</textarea>' +
     '<label class="label">Questions left out (e.g. Q4, Q7)</label><input type="text" id="hwf-skipped" class="input" value="' + escA((f.skipped || []).join(', ')) + '">' +
     '<label class="label">Hints (one per line; small steps like "Q2: Step 1: … Step 2: …")</label><textarea id="hwf-hints" class="textarea" rows="3">' + escT((f.hints || []).join('\n')) + '</textarea>' +
-    '<label class="col-pill" style="cursor:pointer; display:inline-flex; margin:0 0 10px 0;"><input type="checkbox" id="hwf-redo"' + (f.resubmit ? ' checked' : '') + '> 🔁 Ask the student to correct and submit again</label>' +
+    '<label class="col-pill" style="cursor:pointer; display:inline-flex; margin:0 0 10px 0;"><input type="checkbox" id="hwf-redo"' + (f.resubmit ? ' checked' : '') + '> 🔁 Ask the student to fix it and send again <span style="font-size:0.74rem; color:var(--text-muted);">(only after the FIRST check — after the fixed copy, or at 95%+, it is always “All clear”)</span></label>' +
     '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
       '<button type="button" class="btn btn-green" style="flex:1;" onclick="hwSaveManual(\'' + escA(phone) + '\')">💾 Save</button>' +
       (f.id ? '<button type="button" class="btn btn-red" onclick="hwDeleteFeedback(\'' + escA(phone) + '\')">🗑️ Remove feedback</button>' : '') +
@@ -17213,8 +17224,16 @@ function renderStudentHwHtml(u) {
         // 📄 the same report the teacher gets: feedback + the student's own pages with the mistakes marked
         stuCheckedCopyHtml(t, f, s) +
         '<button type="button" class="btn btn-blue btn-sm" style="margin-top:8px;" onclick="studentHwReport(\'' + escA(t.id) + '\')">📄 Download full report (feedback' + (f.chkId || f.pgKey ? ' + your checked copy' : '') + ')</button>' +
-      (redoAsk && !redone ? '<div class="blink-live" style="margin-top:8px; background:rgba(234,179,8,0.12); border:1px solid #ca8a04; border-radius:10px; padding:10px 12px; color:#fde68a;"><b>🔁 Correct your mistakes and submit again.</b><div style="font-size:0.84rem; margin:2px 0 8px 0;">Use the hints above, redo ONLY those questions, then upload the corrected pages. The questions you already got right stay right — you do not have to send them again.</div><button type="button" class="btn btn-purple btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Upload corrected work</button></div>' : '') +
-      (redone ? '<div style="margin-top:8px; color:#86efac; font-size:0.86rem;">📤 Corrected work uploaded on ' + fmtDateTime(s.uploadedAt) + ' — waiting for your teacher to check it again.</div>' : '');
+      (redoAsk && !redone ? '<div class="blink-live" style="margin-top:8px; background:rgba(234,179,8,0.12); border:1px solid #ca8a04; border-radius:10px; padding:10px 12px; color:#fde68a;"><b>✏️ Fix these mistakes and send your work again.</b><div style="font-size:0.84rem; margin:2px 0 8px 0;">Use the hints above. Do ONLY the questions that were wrong or left out, then send those pages. The questions you got right are already counted — do not send them again.</div><button type="button" class="btn btn-purple btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Send my fixed work</button></div>' : '') +
+      (redone ? '<div style="margin-top:8px; color:#86efac; font-size:0.86rem;">📤 Your fixed work was sent on ' + fmtDateTime(s.uploadedAt) + ' — your teacher will check it.</div>' : '') +
+      // ✅ nothing more to send (the fixed work is checked, or 95% and more is right)
+      (!f.resubmit && !redone ? (function() {
+        var p = hwPct(f, t), rest = p !== null && p < 100;
+        return '<div style="margin-top:8px; padding:10px 12px; border-radius:10px; background:rgba(22,163,74,0.14); border:1px solid #16a34a; color:#bbf7d0;">' +
+          '<b style="font-size:1rem;">✅ All clear — nothing pending.</b>' +
+          (rest ? '<div style="font-size:0.84rem; margin-top:3px;">Well done! Practise the question(s) that are still not right by yourself next time. You do not need to send this work again.</div>'
+                : '<div style="font-size:0.84rem; margin-top:3px;">Everything is done. You do not need to send this work again.</div>') + '</div>';
+      })() : '');
     } else if (f && f.status === 'missing') {
       var lateSub = s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0);
       status = '<div style="background:rgba(220,38,38,0.12); border:1px solid #dc2626; border-radius:10px; padding:10px 12px; color:#fca5a5;"><b>❌ Not submitted</b>' + (f.remark ? '<div style="color:#fecaca; margin-top:4px;">💬 ' + esc(f.remark) + '</div>' : '') +

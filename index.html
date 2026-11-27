@@ -1621,9 +1621,31 @@ var REQUIRED_FOLDERS = [
   'JEE Main (11-12)',
   'JEE Advanced (11-12)',
   // West Bengal board: one folder per class (the old joint "11-12" folder stays until its questions are moved)
-  'WB Board Class 11 (বাংলা)',
-  'WB Board Class 12 (বাংলা)'
+  'WB Board Class 11',
+  'WB Board Class 12'
 ];
+// the folder names without "(বাংলা)" — older names are renamed once, with their questions and exams
+var FOLD_RENAME = { 'WB Board Class 11-12 (বাংলা)': 'WB Board Class 11-12', 'WB Board Class 11 (বাংলা)': 'WB Board Class 11', 'WB Board Class 12 (বাংলা)': 'WB Board Class 12' };
+function foldRenamed(name) { return Object.prototype.hasOwnProperty.call(FOLD_RENAME, name) ? FOLD_RENAME[name] : name; }
+// teacher's portal: rename in the folder list, the Question Bank and the exams (each only when that list is loaded)
+function applyFolderRenames(what) {
+  if (typeof cloud === 'undefined' || cloud.role !== 'admin') return;
+  try {
+    if (what === 'parts') {
+      var ps = DB.get(K.PARTS), out = [];
+      ps.forEach(function(p) { var n = foldRenamed(p); if (out.indexOf(n) === -1) out.push(n); });
+      if (JSON.stringify(out) !== JSON.stringify(ps)) DB.set(K.PARTS, out);
+    } else if (what === 'questions') {
+      var qb = DB.get(K.QB), ch = 0;
+      qb.forEach(function(q) { var n = foldRenamed(q.partition); if (q.partition && n !== q.partition) { q.partition = n; ch++; } });
+      if (ch) DB.set(K.QB, qb);
+    } else if (what === 'tests') {
+      var ts = DB.get(K.T), c2 = 0;
+      ts.forEach(function(t) { var n = foldRenamed(t.targetBatch); if (t.targetBatch && n !== t.targetBatch) { t.targetBatch = n; c2++; } });
+      if (c2) DB.set(K.T, ts);
+    }
+  } catch (e) {}
+}
 // "WB Board Class 11 (বাংলা)" → 11 (a West Bengal board folder of ONE class), else 0
 function wbClassOf(folder) { var m = String(folder || '').match(/WB\s*Board\s*Class\s*(11|12)\b(?!\s*-)/i); return m ? Number(m[1]) : 0; }
 
@@ -2454,6 +2476,10 @@ window.onCloudData = function(name, arr, pending) {
     } catch (e) {}
   }
   Store.mem[k] = JSON.stringify(arr);
+  // 🏫 old folder names "… (বাংলা)" → the new names, in the questions and the exams (teacher, once)
+  if ((name === 'questions' || name === 'tests') && cloud.role === 'admin' && arr.some(function(x) { return FOLD_RENAME[name === 'questions' ? x.partition : x.targetBatch]; })) {
+    setTimeout(function() { applyFolderRenames(name); }, 300);
+  }
   if (name === 'questions') {
     try { localStorage.setItem('acsm_qb_n', String(arr.length)); } catch (e) {}   // the dashboard count
     // the bank has just arrived (it is read only when first needed): a window that was waiting for it is drawn again
@@ -3633,7 +3659,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261128001950';
+var APP_BUILD = '20261128002331';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -3844,7 +3870,7 @@ var DB = {
     if (Number(Store.get(K.FOLDVER) || 0) < 3) {
       var ps = this.get(K.PARTS).slice(), changed = false;
       var at = ps.findIndex(function(p) { return /WB\s*Board\s*Class\s*11\s*-\s*12/i.test(p); });
-      ['WB Board Class 11 (বাংলা)', 'WB Board Class 12 (বাংলা)'].forEach(function(f, i) {
+      ['WB Board Class 11', 'WB Board Class 12'].forEach(function(f, i) {
         if (ps.indexOf(f) !== -1) return;
         if (at !== -1) ps.splice(at + 1 + i, 0, f); else ps.push(f);
         changed = true;
@@ -3852,6 +3878,7 @@ var DB = {
       if (changed) this.set(K.PARTS, ps);
       Store.set(K.FOLDVER, '3');
     }
+    applyFolderRenames('parts');      // "(বাংলা)" taken out of the folder names
     if (Store.get(K.BATCHES) === null) this.set(K.BATCHES, []);
     if (Store.get(K.COLS) === null) {
       this.set(K.COLS, [

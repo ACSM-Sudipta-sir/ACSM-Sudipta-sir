@@ -2149,7 +2149,7 @@ function refreshLiveViews() {
       if (window.FBAPI && FBAPI.isLoaded && !FBAPI.isLoaded('users')) return;
       var me = DB.get(K.U).find(function(u) { return currentUser && u.id === currentUser.id; });
       if (me && me.missLock && me.missLock.kind !== 'hw' && !examState) {
-        showToast(cloudAuthMessage('student-miss-locked'), 'error');
+        showToast(cloudAuthMessage(me.missLock.kind === 'wrongpdf' ? 'student-wrongpdf-locked' : 'student-miss-locked'), 'error');
         logoutNow();
         return;
       }
@@ -2570,6 +2570,7 @@ window.onCloudReady = function() {
 
 function cloudAuthMessage(code) {
   if (code === 'student-not-registered') return 'This WhatsApp number is not registered yet. Please contact your teacher.';
+  if (code === 'student-wrongpdf-locked') return '🔒 Your login is locked because you sent a wrong PDF (not your homework) twice. Please meet your teacher — only your teacher can open it again.';
   if (code === 'student-miss-locked') return '🔒 Your login is locked because you did not take several online tests in a row. Please meet your teacher — only your teacher can open it again.';
   if (code === 'student-inactive') return 'Your account is not active. Please contact your teacher.';
   if (code === 'student-passed-out') return 'Your batch has passed out, so this app is now closed for you. Please contact your teacher if you need access.';
@@ -3628,7 +3629,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261127235224';
+var APP_BUILD = '20261128000029';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -11133,6 +11134,9 @@ function waHwReport() {
   var items = hwStudentsOf(t).map(function(u) {
     var s = d.subs[u.id], f = d.fb[u.id];
     var head = 'Dear Guardian,\n📒 *' + k.title + ': ' + (t.title || '') + '*\n👤 ' + (u.fullName || '') + '\n';
+    if (f && f.status === 'checked' && f.wrongPdf && !(s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0))) {
+      return { u: u, tag: 'missed', badge: '<span class="badge badge-hard">wrong PDF</span>', msg: head + '❌ Your ward sent a *different PDF* — not the questions of this homework. Please make sure the right homework is done and sent now.\n' + WRONG_PDF_WARN };
+    }
     if (f && f.status === 'checked') {
       var p = hwPct(f, t), g = hwGrade(p);
       return { u: u, tag: 'done', badge: '<span class="badge badge-easy">' + (p !== null ? p + '%' : 'checked') + '</span>', msg: head + '✅ Checked' + (p !== null ? ': *' + p + '%* done correctly' : '') + (g ? ' — ' + g.label.replace(/^\S+\s/, '') : '') + (f.marks !== null && f.marks !== undefined && f.maxMarks ? '\n📊 Marks: ' + f.marks + ' / ' + f.maxMarks : '') + (f.resubmit && !(s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0)) ? '\n✏️ Some answers must be fixed and sent again — the hints are in the app.' : '\n✅ All clear — nothing pending.') };
@@ -15048,8 +15052,66 @@ function hwMergeRedo(fbNew, old, sub, t) {
   }
   return fbNew;
 }
+// ❌ WRONG PDF: the pages do not answer THIS task's questions (another exercise / another homework / anything else).
+// No marks, no hints, nothing about the questions — only: "do these questions and send the right PDF" + a warning.
+var WRONG_PDF_MSG = '❌ You sent a different PDF — it does not have the questions of this homework. First do THESE questions yourself and send the right PDF. Then you get your marks, and hints for the ones you cannot do.';
+var WRONG_PDF_WARN = '⚠️ Warning: if you send a wrong PDF on purpose twice, your profile will be LOCKED (suspended) until your teacher opens it.';
+function hwMarkWrongPdf(fb) {
+  fb.wrongPdf = true;
+  fb.qtable = []; fb.errors = []; fb.hints = []; fb.missed = []; fb.mistakes = []; fb.skipped = []; fb.strengths = []; fb.advice = [];
+  fb.overall = ''; fb.summary = '';
+  fb.pct = 0; if (fb.marks !== null && fb.marks !== undefined) fb.marks = 0;
+  fb.resubmit = true; fb.redoRound = 0; fb.allClear = false;
+  fb.remark = WRONG_PDF_MSG;
+  return fb;
+}
+// every wrong PDF is written down on the student's record (it stays even when the right PDF comes later)
+function hwWrongPdfCount(sid, taskId) {
+  var u = DB.get(K.U).find(function(x) { return x.id === sid; });
+  var sub = hwDetail && hwDetail.subs ? hwDetail.subs[sid] : null, up = sub ? Number(sub.uploadedAt || 0) : 0;
+  return ((u && u.wrongPdfLog) || []).filter(function(x) { return !(x.task === taskId && Number(x.up || 0) === up); }).length;
+}
+function hwWrongPdfRecord(sid, task) {
+  var users = DB.get(K.U), u = users.find(function(x) { return x.id === sid; });
+  if (!u || !task) return 0;
+  var sub = hwDetail && hwDetail.subs ? hwDetail.subs[sid] : null, up = sub ? Number(sub.uploadedAt || 0) : 0;
+  var log = (u.wrongPdfLog || []).slice();
+  if (!log.some(function(x) { return x.task === task.id && Number(x.up || 0) === up; })) log.push({ task: task.id, title: task.title || '', up: up, at: Date.now() });
+  u.wrongPdfLog = log.slice(-10);
+  // 🔒 the 2nd wrong PDF: the login is locked — only the teacher opens it (🔓 Unlock, as for the other locks)
+  if (log.length >= 2 && !(u.missLock && u.missLock.kind !== 'hw')) {
+    u.missLock = { at: Date.now(), kind: 'wrongpdf', tasks: log.map(function(x) { return x.task; }).slice(-3) };
+    setTimeout(function() { showToast('🔒 ' + (u.fullName || sid) + ' sent a wrong PDF ' + log.length + ' times — the login is LOCKED. Open it with 🔓 Unlock when you are ready.', 'error'); }, 800);
+  }
+  DB.set(K.U, users);
+  return log.length;
+}
+// ✋ HALF FIRST: a student who tried fewer than half of the questions gets NO hints for the questions not tried
+// (they must try them first). With half or more tried, every question still not right gets its full hint.
+function hwHalfRule(fb, t) {
+  if (!fb || fb.wrongPdf) return fb;
+  var rows = Array.isArray(fb.qtable) ? fb.qtable : [], total = rows.length, tried = 0, notTried = {};
+  if (total >= 2) {
+    rows.forEach(function(r) { if (fbVerdictOf(r.verdict) === 'skipped') { var n = hwQNumOf(r.q); if (n) notTried[n] = 1; notTried['k' + hwQKey(r.q)] = 1; } else tried++; });
+  } else {
+    var qn = t ? hwQuestionNumbers(t) : [];
+    if (qn.length < 2) return fb;
+    var sk = {}; (fb.skipped || []).forEach(function(s) { hwNumsIn(s).forEach(function(n) { sk[n] = 1; }); });
+    total = qn.length; tried = qn.filter(function(n) { return !sk[n]; }).length;
+    qn.forEach(function(n) { if (sk[n]) notTried[n] = 1; });
+  }
+  if (tried * 2 >= total) { fb.halfRule = false; return fb; }
+  // fewer than half tried: the hints of the questions NOT tried are taken out
+  fb.hints = (fb.hints || []).filter(function(h) { var lab = String(h).split(':')[0]; var n = hwQNumOf(lab); return !(notTried['k' + hwQKey(lab)] || (n && notTried[n])); });
+  fb.halfRule = true;
+  fb.resubmit = true;
+  var note = '✋ You tried only ' + tried + ' of ' + total + ' questions. Try at least HALF of the questions yourself first — then you get hints for the rest.';
+  fb.remark = fb.remark ? fb.remark + ' ' + note : note;
+  return fb;
+}
 // the redo rule: below the teacher's % the student MUST correct and submit again (the hints show what to do)
 function hwApplyRedoRule(fb, t) {
+  if (fb.wrongPdf) { fb.resubmit = true; fb.allClear = false; fb.redoAuto = false; return fb; }   // must send the right PDF
   var p = hwPct(fb, t);
   if (p !== null) fb.pct = p;
   var c = missCfg();
@@ -15299,7 +15361,7 @@ document.addEventListener('visibilitychange', function() {
 function checkStudentMissLock() {
   if (cloud.role !== 'student' || !currentUser || examState) return;
   // missed tests: full lock (only the teacher opens it). Homework / fees: the gate opens only that page.
-  if (currentUser.missLock && currentUser.missLock.kind !== 'hw') { missLockScreen('You did not take ' + missCfg().n + ' online tests in a row.'); return; }
+  if (currentUser.missLock && currentUser.missLock.kind !== 'hw') { missLockScreen(currentUser.missLock.kind === 'wrongpdf' ? 'You sent a wrong PDF (not your homework) twice.' : 'You did not take ' + missCfg().n + ' online tests in a row.'); return; }
   var s = studentMissState();
   if (s && s.tests >= s.n) { missLockScreen('You did not take ' + s.n + ' online tests in a row.'); return; }
   var g = stuGate();
@@ -15711,7 +15773,7 @@ function renderHwDetail() {
     var fbTxt = !f ? (s ? '<span class="badge" style="background:#dc2626; color:#fff;">🆕 NEW — to check</span>' : '<span style="color:var(--text-muted);">—</span>')
       : (f.status === 'missing' && s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0)) ? '<span class="badge" style="background:#dc2626; color:#fff;">🆕 sent late — to check</span>'
       : (f.status === 'missing' ? '<span style="color:#fca5a5;">Remark given</span>'
-        : '<span style="color:#86efac;">✔ Checked</span>' + (k.marks && f.marks !== null && f.marks !== undefined ? ' <b>' + f.marks + ' / ' + (t.maxMarks || '') + '</b>' : '') +
+        : (f.wrongPdf ? '<span class="badge" style="background:#7f1d1d; color:#fff;">❌ Wrong PDF — told to send the right one</span>' : '<span style="color:#86efac;">✔ Checked</span>') + (f.halfRule ? ' <span style="font-size:0.72rem; color:#fde68a;">✋ &lt; half tried</span>' : '') + (k.marks && f.marks !== null && f.marks !== undefined ? ' <b>' + f.marks + ' / ' + (t.maxMarks || '') + '</b>' : '') +
           (s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0) ? '<br><span class="badge" style="background:#ca8a04; color:#fff;">🔁 corrected copy — check again</span>' : (f.resubmit ? '<br><span style="font-size:0.72rem; color:#fde68a;">asked to correct</span>' : '')));
     return '<tr>' +
       '<td><input type="checkbox" ' + (s ? '' : 'disabled') + ' ' + (d.sel[u.id] ? 'checked' : '') + ' onchange="hwDetail.sel[\'' + escA(u.id) + '\']=this.checked; renderHwDetail();"></td>' +
@@ -15906,14 +15968,16 @@ function hwCopyPrompt() {
     '2. First find, for every question of the task, WHERE the student answered it (which handwritten page). A question with no answer anywhere goes to "skipped" — no error for it.\n' +
     '3. An error may be reported ONLY if you can SEE it: "written" must copy the student\'s own words / numbers exactly as they appear on that page. If you cannot read a line clearly, do NOT call it wrong — write "could not read clearly" in the note.\n' +
     '4. Re-work every answer yourself. If the student\'s method or answer is right (even if different from yours, or written in another correct form), it is CORRECT. When in doubt, it is correct.\n' +
-    '5. Before replying, check every error once more: is the question in this task? is the quoted line really on that page? If not — delete that error.\n\n' +
+    '5. Before replying, check every error once more: is the question in this task? is the quoted line really on that page? If not — delete that error.\n' +
+    '6. WRONG PDF: if a student\'s handwritten pages do NOT answer the questions of THIS task (another exercise, another homework, another subject, blank or unrelated pages), set "wrongPdf": true for that student and give NO questions table, NO errors, NO hints, percent 0. Otherwise "wrongPdf": false.\n' +
+    '7. HALF FIRST: if a student attempted FEWER than half of the task\'s questions, give hints ONLY for the questions they attempted — NO hint for a question they did not attempt. If they attempted half or more, give a full hint for EVERY question that is wrong, missing or not attempted.\n\n' +
     'For EACH student read their PDF and check every answer. Then reply with ONLY a JSON array (no other text, no markdown), one object per student. THE EXAMPLE BELOW ONLY SHOWS THE SHAPE — its questions and values are NOT from this task, never copy them:\n' +
     '[{"studentId":"<number from the file name>",' + (k.marks ? '"marks":<number from 0 to ' + t.maxMarks + '>,' : '') + '"percent":<0 to 100: how much of the whole task is done correctly>,"remark":"<one short overall remark for the student>",' +
     '"overall":"<2–3 sentences: which questions are right, which are wrong>",' +
     '"questions":[{"q":"<Q-number of THIS task>","verdict":"correct | slip | wrong | skipped","note":"<short: the answer value, or see E1>"}],' +
     '"errors":[{"tag":"E1","q":"<Q-number of THIS task>","severity":"wrong | slip","title":"<what is wrong, short>","written":"<the student\'s own line, copied exactly>","correct":"<the correct working, short>","feedback":"<why it went wrong and how to avoid it>","pen":"<red-pen note to write beside the circle on the page: max 8 words, plain text, no LaTeX>","pdfPage":<page of the PDF FILE where this line is>,"page":<handwritten page number>,"box":[ymin,xmin,ymax,xmax]}],' +
     '"missed":["<Q-number>: <the part left out>"],"hints":["<Q-number>: Idea: … Step 1: … Step 2: … (see HOW TO WRITE A HINT)"],' +
-    '"strengths":["<1–3 things done well>"],"advice":["<2–4 general tips>"],"skipped":["<Q-numbers not attempted>"],"resubmit":true}]\n\n' +
+    '"strengths":["<1–3 things done well>"],"advice":["<2–4 general tips>"],"skipped":["<Q-numbers not attempted>"],"wrongPdf":false,"resubmit":true}]\n\n' +
     'Check EVERY question of the task one by one, line by line. Re-work every answer yourself and compare it with the script.\n' +
     fbDetailPromptRules() +
     '- "pdfPage": the page number of the PDF FILE (as a PDF viewer counts, cover = page 1). "page": the handwritten page (pdfPage minus the cover and question-paper pages). Give both.\n' +
@@ -17065,7 +17129,14 @@ function hwCheckJson() {
     fbNew._gone = gone.filter(function(x, i, a) { return x && a.indexOf(x) === i; });
     hwMergeRedo(fbNew, (hwDetail.fb || {})[p], (hwDetail.subs || {})[p]);   // 🔁 a redo copy: the questions already correct stay correct
     // the check of the SECOND copy (the fixed work): marked, so no third sending is asked for
-    if (hwIsRedo((hwDetail.fb || {})[p], (hwDetail.subs || {})[p]) && !fbNew.redoRound) fbNew.redoRound = Number(((hwDetail.fb || {})[p] || {}).redoRound || 0) + 1;
+    // (a copy sent after a WRONG PDF is the student's first real copy — it is not counted as the second sending)
+    var oldF0 = (hwDetail.fb || {})[p];
+    if (hwIsRedo(oldF0, (hwDetail.subs || {})[p]) && !fbNew.redoRound && !(oldF0 && oldF0.wrongPdf)) fbNew.redoRound = Number((oldF0 || {}).redoRound || 0) + 1;
+    if (oldF0 && oldF0.wrongPdf) fbNew.redoRound = 0;
+    // ❌ the checker found that this PDF is NOT this homework → no marks, no hints, a warning
+    if (it.wrongPdf === true || /^(true|yes)$/i.test(String(it.wrongPdf || it.wrongWork || ''))) hwMarkWrongPdf(fbNew);
+    else hwHalfRule(fbNew, t);           // ✋ fewer than half tried → no hints for the questions not tried
+    if (fbNew.wrongPdf) fbNew._wrongN = hwWrongPdfCount(p, t.id) + 1;   // shown in the preview (2nd time = lock)
     hwPreview.push(hwApplyRedoRule(fbNew, t));    // 🏅 grade + 🔁 automatic redo below the teacher's %
   });
   if (!hwPreview.length) { box.innerHTML = '<p style="color:#fca5a5;">No student of this class was found in the JSON' + (unknown.length ? ' (numbers: ' + esc(unknown.join(', ')) + ')' : '') + '.</p>'; return; }
@@ -17074,6 +17145,8 @@ function hwCheckJson() {
     '<div class="qb-table-wrap"><table class="qb-table"><thead><tr><th>Student</th>' + (k.marks ? '<th>Marks</th>' : '') + '<th>Remark</th><th>Found</th></tr></thead><tbody>' +
     hwPreview.map(function(f) {
       return '<tr><td><b>' + esc(byId[f.studentId].fullName) + '</b>' + (d.fb[f.studentId] ? '<br><span style="font-size:0.7rem; color:#fcd34d;">replaces old feedback</span>' : '') +
+        (f.wrongPdf ? '<br><span style="font-size:0.74rem; color:#fca5a5; font-weight:800;">❌ WRONG PDF (not this homework) — no hints, the student must send the right one' + (f._wrongN >= 2 ? ' • 🔒 ' + f._wrongN + 'nd time: the login will be LOCKED on save' : ' • warned (1st time)') + '</span>' : '') +
+        (f.halfRule ? '<br><span style="font-size:0.72rem; color:#fde68a;">✋ fewer than half tried — no hints for the questions not tried</span>' : '') +
         (f.mergedFrom ? '<br><span style="font-size:0.72rem; color:#6ee7b7;">🔁 redo copy: ' + f.mergedFrom + ' question(s) already correct in the first copy kept ✔ • whole work ' + f.pct + '%' + (f.resubmit ? ' — redo still needed' : ' — no more redo') + '</span>' : '') + '</td>' +
         (k.marks ? '<td>' + (f.marks === null ? '—' : f.marks + ' / ' + t.maxMarks) + '</td>' : '') +
         '<td style="font-size:0.8rem;">' + esc(f.remark) + (f._gone && f._gone.length ? '<div style="color:#fcd34d; font-size:0.74rem; margin-top:3px;">🛡 Removed — not in this task: ' + esc(f._gone.join(', ')) + '</div>' : '') + '</td><td style="font-size:0.78rem;">' + ((f.errors || []).length ? (f.errors.length + ' errors (' + f.errors.filter(function(e) { return e.page && e.box; }).length + ' with a box) • ') : '') + ((f.qtable || []).length ? f.qtable.length + ' Qs • ' : '') + f.mistakes.length + ' mistakes • ' + f.missed.length + ' missed • ' + f.hints.length + ' hints</td></tr>';
@@ -17087,6 +17160,9 @@ async function hwSavePreview() {
   var ok = 0, made = [];
   for (var i = 0; i < hwPreview.length; i++) {
     delete hwPreview[i]._gone;
+    // ❌ a WRONG PDF is written down on the student's record; the 2nd time the login is locked
+    if (hwPreview[i].wrongPdf) hwWrongPdfRecord(hwPreview[i].studentId, hwDetail.task);
+    delete hwPreview[i]._wrongN;
     try { await FBAPI.hwFeedbackSave(hwPreview[i]); ok++; made.push({ t: hwDetail.task, phone: hwPreview[i].studentId, f: hwPreview[i], sub: hwDetail.subs[hwPreview[i].studentId] }); } catch (e) {}
   }
   queueMarkedPages(made);      // 📄 the students' reports are prepared in the background (quick download later)
@@ -17118,6 +17194,7 @@ function openHwFeedbackModal(phone) {
     '<label class="label">Parts missed in an answer (one per line, start with the question: "Q2: the final check")</label><textarea id="hwf-missed" class="textarea" rows="2">' + escT((f.missed || []).join('\n')) + '</textarea>' +
     '<label class="label">Questions left out (e.g. Q4, Q7)</label><input type="text" id="hwf-skipped" class="input" value="' + escA((f.skipped || []).join(', ')) + '">' +
     '<label class="label">Hints (one per line; small steps like "Q2: Step 1: … Step 2: …")</label><textarea id="hwf-hints" class="textarea" rows="3">' + escT((f.hints || []).join('\n')) + '</textarea>' +
+    '<label class="col-pill" style="cursor:pointer; display:flex; margin:0 0 6px 0; border-color:#7f1d1d;"><input type="checkbox" id="hwf-wrong"' + (f.wrongPdf ? ' checked' : '') + '> <span>❌ <b>Wrong PDF</b> — these pages are NOT this homework (no marks, no hints; the student is warned; the 2nd time the login is locked)</span></label>' +
     '<label class="col-pill" style="cursor:pointer; display:inline-flex; margin:0 0 10px 0;"><input type="checkbox" id="hwf-redo"' + (f.resubmit ? ' checked' : '') + '> 🔁 Ask the student to fix it and send again <span style="font-size:0.74rem; color:var(--text-muted);">(only after the FIRST check — after the fixed copy, or at 95%+, it is always “All clear”)</span></label>' +
     '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
       '<button type="button" class="btn btn-green" style="flex:1;" onclick="hwSaveManual(\'' + escA(phone) + '\')">💾 Save</button>' +
@@ -17166,7 +17243,12 @@ async function hwSaveManual(phone) {
       fb.pct = Math.round(sc / fb.qtable.length * 100);
     }
   }
+  // ❌ the teacher ticked "Wrong PDF"
+  var wrongBox = document.getElementById('hwf-wrong');
+  if (wrongBox && wrongBox.checked && d.subs[phone]) hwMarkWrongPdf(fb);
+  else fb.wrongPdf = false;
   hwApplyRedoRule(fb, t);     // 🏅 grade + 🔁 must redo when below the teacher's %
+  if (fb.wrongPdf) hwWrongPdfRecord(phone, t);
   if (fb.status === 'missing') fb.lockWarn = missLockWarnText() || '⚠️ Submit it now. If you do not submit your homework / assignments, your portal will be LOCKED and you will not be able to use your student login until your teacher opens it again.';
   try {
     await FBAPI.hwFeedbackSave(fb);
@@ -17217,7 +17299,13 @@ function renderStudentHwHtml(u) {
     var k = HW_KINDS[hwKind(t)], s = hwMineCache.subs[t.id], f = hwMineCache.fb[t.id], over = hwOverdue(t);
     var status = '';
     var redoAsk = f && f.status === 'checked' && f.resubmit, redone = redoAsk && s && Number(s.uploadedAt || 0) > Number(f.checkedAt || 0);
-    if (f && f.status === 'checked') {
+    if (f && f.status === 'checked' && f.wrongPdf && !redone) {
+      // ❌ a wrong PDF: no marks, no hints — send the right one (+ the warning)
+      status = '<div class="blink-live" style="background:rgba(220,38,38,0.14); border:2px solid #dc2626; border-radius:12px; padding:12px 14px; color:#fecaca;">' +
+        '<b style="font-size:1rem;">❌ Wrong PDF</b><div style="margin:4px 0 6px; font-size:0.88rem; color:#fff;">' + esc(WRONG_PDF_MSG.replace(/^❌\s*/, '')) + '</div>' +
+        '<div style="font-size:0.82rem; font-weight:800; color:#fca5a5; margin-bottom:8px;">' + esc(WRONG_PDF_WARN) + '</div>' +
+        '<button type="button" class="btn btn-purple btn-sm" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Send the right PDF</button></div>';
+    } else if (f && f.status === 'checked') {
       status = (hwNewFbIds[t.id] ? '<div class="fb-new blink-live">🆕 Your teacher has checked this — read the feedback below</div>' : '') +
         hwFeedbackHtml(f, t) +
         rankCardHtml('hw_' + t.id, '') +      // 🏆 my place in the class for this homework
@@ -17247,7 +17335,9 @@ function renderStudentHwHtml(u) {
     } else if (over && !hwLateOk(t) && hwGateTaskIds().indexOf(t.id) === -1) {
       status = '<div style="background:rgba(220,38,38,0.12); border:1px solid #dc2626; border-radius:10px; padding:10px 12px; color:#fca5a5;">⛔ <b>Submission closed</b> on ' + fmtDateTime(t.dueAtMs) + '. Please talk to your teacher.</div>';
     } else {
-      status = '<button type="button" class="btn ' + (over ? 'btn-slate' : 'btn-purple blink-live') + ' btn-block" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Upload your work (PDF' + (over ? ', late' : '') + ')</button>';
+      status = '<button type="button" class="btn ' + (over ? 'btn-slate' : 'btn-purple blink-live') + ' btn-block" onclick="hwPickFile(\'' + escA(t.id) + '\')">📤 Upload your work (PDF' + (over ? ', late' : '') + ')</button>' +
+        // the rules, before the first upload
+        '<div style="margin-top:6px; font-size:0.76rem; color:var(--text-muted); line-height:1.5;">📌 Upload ONLY the pages of <b>these</b> questions. Sent a wrong PDF by mistake? Press <b>✏️ Change PDF</b> after uploading and send the right one — before your teacher checks it. A wrong PDF sent twice on purpose locks your profile. • Try at least <b>half</b> of the questions yourself — then you get hints for the rest.</div>';
     }
     return '<div class="card" style="border-left:4px solid ' + (k.marks ? '#6366f1' : '#22c55e') + ';">' +
       '<div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; align-items:center;">' +
@@ -19820,7 +19910,7 @@ async function resolveUser(user) {
       if (u.status && u.status !== "active") { await refuse(u.status === "passed_out" ? "student-passed-out" : "student-inactive"); return; }
       // 🔒 locked by the teacher's miss rule (missed too many homework / tests in a row)
       // (a homework lock still lets the student in — only the Homework page opens until the work is submitted)
-      if (u.missLock && u.missLock.kind !== "hw") { await refuse("student-miss-locked"); return; }
+      if (u.missLock && u.missLock.kind !== "hw") { await refuse(u.missLock.kind === "wrongpdf" ? "student-wrongpdf-locked" : "student-miss-locked"); return; }
       // 📱 device lock: up to maxDevices (2 by default) known devices per student. The first device(s) are kept;
       // a new device gets a 6-digit code — the student adds it from a device that is already allowed
       // (📱 My Devices), or the teacher allows it. When the limit is reached only the teacher can allow it.

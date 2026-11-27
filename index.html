@@ -2479,6 +2479,7 @@ window.onCloudSetting = function(id, data, pending) {
     Store.mem[K.BATCHES] = d.batches ? JSON.stringify(d.batches) : null;
     Store.mem[K.BSCHED] = d.batchSched ? JSON.stringify(d.batchSched) : null;
     Store.mem[K.RANKAUTO] = d.rankAuto === false ? '0' : '1';
+    cloud.devAuto = d.devAuto !== false;     // 📱 a new phone replaces the oldest by itself (default) / the teacher allows it
     Store.mem[K.COLS] = d.columns ? JSON.stringify(d.columns) : null;
     Store.mem[K.CC] = (d.cc !== undefined && d.cc !== null) ? String(d.cc) : null;
     Store.mem[K.LASTBK] = d.lastBackupAt ? String(d.lastBackupAt) : null;
@@ -3627,7 +3628,7 @@ function diffBadge(d) {
 // 🔄 UPDATE BUTTON: every new version that goes to GitHub gets a new build number (written by itself when it is
 // sent). The open app looks at version.json now and then; a newer number shows "🔄 A new update — Update now",
 // and one tap opens the new version (Android, iPhone, iPad, Windows — installed app or browser).
-var APP_BUILD = '20261127000602';
+var APP_BUILD = '20261127231600';
 var updateShownFor = '';
 // ⏰ a phone whose clock is wrong (a few minutes slow) would keep an exam "not open yet": the real time is read
 // from the web server's answer and the exam times are judged by it
@@ -3663,8 +3664,30 @@ function updateSafeNow() {
   if (document.getElementById('pdf-pick-box') || document.getElementById('dev-code-box')) return false;
   return true;
 }
+// 🤫 students: NO update message at all — the new version is kept ready and put in quietly when the app goes to the
+// background (closed / another app). The next time they open the app, it simply opens on the new version.
+var updPendingV = '';
+function applyAppUpdateQuiet(v) {
+  if (typeof examState !== 'undefined' && (examState || examStarting)) return;
+  var tried = ''; try { tried = sessionStorage.getItem('acsm_quiet_upd') || ''; } catch (e) {}
+  if (tried.split('|')[0] === v && Date.now() - Number(tried.split('|')[1] || 0) < 600000) return;   // never a reload loop
+  try { sessionStorage.setItem('acsm_quiet_upd', v + '|' + Date.now()); } catch (e) {}
+  (async function() {
+    try { var regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(function(r) { return r.update().catch(function() {}); })); } catch (e) {}
+    try { var keys = await caches.keys(); await Promise.all(keys.map(function(k) { return caches.delete(k); })); } catch (e) {}
+    location.replace(location.pathname + '?u=' + encodeURIComponent(v) + location.hash);
+  })();
+}
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'hidden' && updPendingV && !(typeof cloud !== 'undefined' && cloud.role === 'admin')) applyAppUpdateQuiet(updPendingV);
+});
 function showUpdateBanner(v) {
   if (typeof examState !== 'undefined' && examState) return;          // never during an exam (asked again later)
+  if (!(typeof cloud !== 'undefined' && cloud.role === 'admin')) {     // a student / visitor: quietly, no banner, no message
+    updPendingV = v;
+    if (document.hidden) applyAppUpdateQuiet(v);
+    return;
+  }
   // students: updated at once, no tap needed (once per version per 10 min — never a reload loop)
   var tried = ''; try { tried = sessionStorage.getItem('acsm_auto_upd') || ''; } catch (e) {}
   if (updateSafeNow() && !(tried.split('|')[0] === v && Date.now() - Number(tried.split('|')[1] || 0) < 600000)) {
@@ -3695,7 +3718,8 @@ async function applyAppUpdate(v) {
 window.addEventListener('load', function() {
   // after an update: tidy the address, say it is done
   if (/[?&]u=/.test(location.search) && !/oobCode|mode=/.test(location.search)) { try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {} }
-  try { if (sessionStorage.getItem('acsm_just_updated')) { sessionStorage.removeItem('acsm_just_updated'); setTimeout(function() { showToast('✅ Updated — you have the newest version.', 'success'); }, 2500); } } catch (e) {}
+  // "✅ Updated" is said only to the teacher (students update quietly)
+  try { if (sessionStorage.getItem('acsm_just_updated')) { sessionStorage.removeItem('acsm_just_updated'); setTimeout(function() { if (typeof cloud !== 'undefined' && cloud.role === 'admin') showToast('✅ Updated — you have the newest version.', 'success'); }, 2500); } } catch (e) {}
   setTimeout(checkAppUpdate, 6000);
   setInterval(checkAppUpdate, 180000);             // every 3 minutes while it is open
 });
@@ -8008,6 +8032,11 @@ async function rejectDevice(phone) {
   updateDeviceAlert();
 }
 
+function setDevAuto(on) {
+  cloud.devAuto = !!on;
+  FBAPI.saveSetting('config', { devAuto: !!on });
+  showToast(on ? '♻️ New phones now take the place of the oldest by themselves — no more requests.' : '🔒 Every new phone now waits for your Allow.', 'success');
+}
 // ---------- 📱 DEVICES: new-device requests + the allowed device of every student ----------
 var deviceAll = null;
 function renderAdminDevicesContent() {
@@ -8023,7 +8052,12 @@ function renderAdminDevicesContent() {
     return '<tr>' + stuIdentCell(u) +
       '<td>' + esc(u.studentClass || u.batch || '') + '</td>' +
       '<td style="font-size:0.82rem;">' + (devs.map(function(d, i) { return '<b>' + (i + 1) + '.</b> ' + (/Windows|Mac|Linux/i.test(d.label || '') ? '💻 ' : '📱 ') + '<b>' + esc(niceDevLabel(d.label)) + '</b><span style="color:var(--text-muted);"> — ' + (seen[d.id] ? 'used ' + fmtWhen(seen[d.id]) : (d.boundAt ? 'since ' + fmtWhen(d.boundAt) : '')) + '</span>'; }).join('<br>') || '—') +
-        (function() { var tr = (l.tries || []).filter(function(x) { return Date.now() - Number(x.at || 0) < 30 * 86400000; }); return tr.length ? '<div style="margin-top:4px; color:#fca5a5; font-weight:700;">🚫 ' + tr.length + ' try(s) from other phones in 30 days — last: ' + esc(niceDevLabel(tr[tr.length - 1].label)) + ', ' + fmtWhen(tr[tr.length - 1].at) + '</div>' : ''; })() + '</td>' +
+        (function() {
+          var tr = (l.tries || []).filter(function(x) { return Date.now() - Number(x.at || 0) < 30 * 86400000; });
+          var bad = tr.filter(function(x) { return !x.replaced; }), sw = tr.filter(function(x) { return x.replaced; });
+          return (bad.length ? '<div style="margin-top:4px; color:#fca5a5; font-weight:700;">🚫 ' + bad.length + ' try(s) from other phones in 30 days — last: ' + esc(niceDevLabel(bad[bad.length - 1].label)) + ', ' + fmtWhen(bad[bad.length - 1].at) + '</div>' : '') +
+            (sw.length ? '<div style="margin-top:4px; color:#fcd34d; font-weight:700;">♻️ ' + sw.length + ' phone change(s) in 30 days — last: ' + esc(niceDevLabel(sw[sw.length - 1].label)) + ' took the place of ' + esc(niceDevLabel(sw[sw.length - 1].replaced)) + ', ' + fmtWhen(sw[sw.length - 1].at) + '</div>' : '');
+        })() + '</td>' +
       '<td style="font-size:0.82rem;">' + (l.lastLoginAt ? fmtWhen(l.lastLoginAt) : '—') + (l.lastIp ? '<br><span style="color:var(--text-muted);">IP ' + esc(l.lastIp) + '</span>' : '') + '</td>' +
       '<td>' + st + '</td>' +
       '<td><button type="button" class="btn btn-slate btn-xs" onclick="openStudentLoginModal(\'' + escA(u.id) + '\')">🔐 Manage</button></td></tr>';
@@ -8033,6 +8067,7 @@ function renderAdminDevicesContent() {
     '<div class="card">' +
       '<h3 style="margin:0 0 4px 0;">📱 Devices</h3>' +
       '<p style="margin:0 0 10px 0; font-size:0.8rem; color:var(--text-muted);">Every student may use the portal on <b>' + ((window.FBAPI && FBAPI.DEFAULT_DEVICES) || 2) + ' devices</b> (e.g. phone + laptop; change it per student with 🔐 Manage). A second device is added by the student with a code from the first one — you only act when all places are used. A device not used for ' + DEVICE_EXPIRE_DAYS + ' days is dropped automatically.</p>' +
+      '<label class="col-pill" style="cursor:pointer; display:flex; margin:0 0 10px 0;"><input type="checkbox"' + (cloud.devAuto !== false ? ' checked' : '') + ' onchange="setDevAuto(this.checked)"> <span>♻️ <b>No requests to me:</b> when a student uses a new phone and both places are used, the new phone takes the place of the phone used longest ago by itself (you see it here as ♻️). Untick = every new phone waits for your “Allow”.</span></label>' +
       '<input type="text" id="stu-search" class="input" style="max-width:260px;" placeholder="🔎 Search name / number" value="' + escA(stuSearchQuery) + '" oninput="stuSearchQuery=this.value; renderAdminDevicesContent(); var el=document.getElementById(\'stu-search\'); el.focus(); el.setSelectionRange(el.value.length, el.value.length);">' +
       (deviceAll ? '' : '<p style="font-size:0.8rem; color:var(--text-muted);">Loading the device list…</p>') +
       '<div class="qb-table-wrap"><table class="qb-table"><thead><tr><th>Student</th><th>Class</th><th>Allowed devices</th><th>Last login</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
@@ -8069,7 +8104,7 @@ async function openStudentLoginModal(stuId) {
       }).join('') +
       '<p style="margin:6px 0 4px 0;"><b>Last login:</b> ' + fmtWhen(l.lastLoginAt) + (l.lastIp ? ' from IP ' + esc(l.lastIp) : '') + '</p>' +
       ((l.tries || []).length ? '<div style="margin:8px 0; padding:8px 10px; border-radius:8px; background:rgba(220,38,38,0.10); border:1px solid #7f1d1d; font-size:0.8rem;"><b style="color:#fca5a5;">🚫 Tries from phones that are NOT allowed (latest first):</b>' +
-        l.tries.slice().reverse().map(function(x) { return '<div style="margin-top:3px;">📱 ' + esc(niceDevLabel(x.label)) + ' <span style="color:var(--text-muted);">— ' + fmtWhen(x.at) + (x.ip ? ' • IP ' + esc(x.ip) : '') + '</span></div>'; }).join('') + '</div>' : '') +
+        l.tries.slice().reverse().map(function(x) { return '<div style="margin-top:3px;">' + (x.replaced ? '♻️ ' : '📱 ') + esc(niceDevLabel(x.label)) + (x.replaced ? ' <span style="color:#fcd34d;">took the place of ' + esc(niceDevLabel(x.replaced)) + '</span>' : '') + ' <span style="color:var(--text-muted);">— ' + fmtWhen(x.at) + (x.ip ? ' • IP ' + esc(x.ip) : '') + '</span></div>'; }).join('') + '</div>' : '') +
       (l.pendingDevice && l.pendingDevice.id ? '<p style="margin:6px 0 4px 0; color:#fcd34d;">🆕 Waiting: ' + esc(niceDevLabel(l.pendingDevice.label)) + (l.pendingDevice.ip ? ' (IP ' + esc(l.pendingDevice.ip) + ')' : '') + ' • ' + fmtWhen(l.pendingDevice.at) + (l.pendingDevice.code ? ' • code ' + esc(l.pendingDevice.code) : '') + '</p>' +
         '<button type="button" class="btn btn-green btn-block" onclick="approveDevice(\'' + escA(stuId) + '\', this).then(function(){ openStudentLoginModal(\'' + escA(stuId) + '\'); })">✅ Allow this new device' + (devs.length >= max ? ' (replaces the oldest)' : '') + '</button>' : '') +
       limitSel +
@@ -19747,7 +19782,11 @@ async function resolveUser(user) {
         } catch (e) { if (isHang(e) && goMemory()) return; }
       }
       // the student's record and the device lock are asked together, not one after the other
-      const both = await Promise.allSettled([limit(getDoc(doc(db, "users", phone)), 10000), limit(getDoc(doc(db, "logins", phone)), 10000)]);
+      const both = await Promise.allSettled([limit(getDoc(doc(db, "users", phone)), 10000), limit(getDoc(doc(db, "logins", phone)), 10000), limit(getDoc(doc(db, "settings", "config")), 10000)]);
+      // the teacher's device rule: true (default) = a new phone beyond the limit takes the place of the phone used
+      // longest ago by itself (no request to the teacher); false = the teacher has to allow it
+      let devAuto = true;
+      try { if (both[2].status === "fulfilled" && both[2].value.exists() && both[2].value.data().devAuto === false) devAuto = false; } catch (e) {}
       if ((isHang(both[0].reason) || isHang(both[1].reason)) && goMemory()) return;
       const noNet = function (r) { return r.status === "rejected" && !(r.reason && r.reason.code === "permission-denied"); };
       if (noNet(both[0]) || noNet(both[1])) {
@@ -19782,6 +19821,9 @@ async function resolveUser(user) {
         // entries allowed BEFORE the fingerprint existed (most Android ones only say "Android (K) · Chrome"):
         // the same phone type + browser takes its place — if two match, the one used longest ago
         if (!match.length) match = devs.filter(function (d) { return !d.fp && d.label && (d.label === lblRaw || d.label === lbl) && !/^(Device|Linux) · Browser$/.test(lblRaw); });
+        // the fingerprint changed (a phone setting: display size, language …) but it is the SAME phone model + browser
+        // ("Android — Samsung Galaxy A14 (SM-A145F) · Chrome"): recognised too
+        if (!match.length && / — /.test(lbl)) match = devs.filter(function (d) { return d.label === lbl; });
         if (match.length > 1) {
           const seen0 = (lg && lg.seen) || {};
           match.sort(function (a, b) { return Number(seen0[a.id] || a.boundAt || 0) - Number(seen0[b.id] || b.boundAt || 0); });
@@ -19802,6 +19844,18 @@ async function resolveUser(user) {
         const list = devs.concat([{ id: dev, label: lbl, fp: fp, boundAt: now, ip: "", auto: true }]);
         try {
           await setDoc(doc(db, "logins", phone), { devices: list, pendingDevice: null }, { merge: true });
+          devs = list; known = true;
+        } catch (e) {}
+      }
+      // ♻️ all places used, the teacher's rule is "automatic": this phone takes the place of the one used longest ago —
+      // the student gets in at once; the teacher sees it in 📱 Devices (no request, no waiting)
+      if (devs.length && !known && devAuto) {
+        const seen1 = (lg && lg.seen) || {};
+        const oldest = devs.slice().sort(function (a, b) { return Number(seen1[a.id] || a.boundAt || 0) - Number(seen1[b.id] || b.boundAt || 0); })[0];
+        const list = devs.map(function (d) { return d === oldest ? { id: dev, label: lbl, fp: fp, boundAt: now, ip: "", auto: true, replaced: oldest.label || "" } : d; });
+        try {
+          const tries = (Array.isArray(lg && lg.tries) ? lg.tries : []).concat([{ label: lbl, at: now, ip: "", replaced: oldest.label || "device" }]).slice(-15);
+          await setDoc(doc(db, "logins", phone), { devices: list, deviceId: list[0].id, deviceLabel: list[0].label || "", pendingDevice: null, tries: tries }, { merge: true });
           devs = list; known = true;
         } catch (e) {}
       }
